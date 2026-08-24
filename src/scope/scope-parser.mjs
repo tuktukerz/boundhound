@@ -11,10 +11,33 @@ function normList(x) {
   return x.map(String)
 }
 
+function lowercaseDomains(domains) {
+  return domains.map(d => d.toLowerCase())
+}
+
 function assertWildcardsSafe(domains) {
   for (const d of domains) {
     if (d === "*" || /^\*\.[^.]+$/.test(d)) {
       throw new ScopeError(`wildcard too broad (TLD-level): ${d}`)
+    }
+  }
+}
+
+function assertCidrValid(cidrs) {
+  for (const c of cidrs) {
+    const [net, bitsStr] = c.split("/")
+    if (!bitsStr) throw new ScopeError(`invalid CIDR: ${c} (missing prefix length)`)
+    const bits = Number(bitsStr)
+    if (!Number.isInteger(bits) || bits < 0 || bits > 32) {
+      throw new ScopeError(`invalid CIDR: ${c} (prefix must be 0-32)`)
+    }
+    const octets = net.split(".")
+    if (octets.length !== 4) throw new ScopeError(`invalid CIDR: ${c} (expected 4 octets)`)
+    for (const octet of octets) {
+      const val = Number(octet)
+      if (!Number.isInteger(val) || val < 0 || val > 255) {
+        throw new ScopeError(`invalid CIDR: ${c} (octets must be 0-255)`)
+      }
     }
   }
 }
@@ -32,15 +55,23 @@ export function parseScope(yamlString) {
   if (!ENFORCEMENT.has(raw.scope_enforcement)) {
     throw new ScopeError(`invalid scope_enforcement: ${raw.scope_enforcement}`)
   }
+  const inDomains = lowercaseDomains(normList(raw.in_scope?.domains))
+  const inCidrs = normList(raw.in_scope?.cidrs)
+  const outDomains = lowercaseDomains(normList(raw.out_of_scope?.domains))
+  const outCidrs = normList(raw.out_of_scope?.cidrs)
+
+  assertWildcardsSafe(inDomains)
+  assertCidrValid(inCidrs)
+  assertCidrValid(outCidrs)
+
   const inScope = {
-    domains: normList(raw.in_scope?.domains),
-    cidrs: normList(raw.in_scope?.cidrs),
+    domains: inDomains,
+    cidrs: inCidrs,
   }
   const outScope = {
-    domains: normList(raw.out_of_scope?.domains),
-    cidrs: normList(raw.out_of_scope?.cidrs),
+    domains: outDomains,
+    cidrs: outCidrs,
   }
-  assertWildcardsSafe(inScope.domains)
   return {
     engagement: String(raw.engagement),
     authorization: String(raw.authorization),

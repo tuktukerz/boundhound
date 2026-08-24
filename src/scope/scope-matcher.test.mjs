@@ -39,3 +39,13 @@ test("unlisted target -> DENY deny-by-default", () => {
   expect(r.decision).toBe("DENY")
   expect(r.reason).toMatch(/deny-by-default/)
 })
+
+test("case-insensitive out_of_scope domain matching", () => {
+  const cfgMixed = {
+    in_scope: { domains: ["*.acme.com"], cidrs: [] },
+    out_of_scope: { domains: ["Blog.Acme.com"], cidrs: [] },
+  }
+  const r = matchTarget("blog.acme.com", cfgMixed)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/out_of_scope/)
+})

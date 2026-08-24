@@ -12,7 +12,13 @@ export function normalizeTarget(raw) {
 }
 
 function isIPv4(s) {
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s)
+  const octets = s.split(".")
+  if (octets.length !== 4) return false
+  for (const octet of octets) {
+    const val = Number(octet)
+    if (!Number.isInteger(val) || val < 0 || val > 255) return false
+  }
+  return true
 }
 
 function ipToInt(ip) {
@@ -29,6 +35,7 @@ function inCidr(ip, cidr) {
 }
 
 function domainMatches(host, rule) {
+  rule = rule.toLowerCase()
   if (rule.startsWith("*.")) {
     const suffix = rule.slice(1)        // ".acme.com"
     return host.endsWith(suffix) && host.length > suffix.length

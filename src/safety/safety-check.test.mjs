@@ -26,3 +26,23 @@ test("allows benign args", () => {
 test("lab profile (all off) allows destructive", () => {
   expect(checkSafety("sqlmap", ["--dump-all"], off).decision).toBe("ALLOW")
 })
+
+test("DOS check catches --threads=<n> form", () => {
+  expect(checkSafety("ffuf", ["--threads=5000"], strict).decision).toBe("DENY")
+})
+
+test("DOS check catches -t<n> glued form", () => {
+  expect(checkSafety("ffuf", ["-t5000"], strict).decision).toBe("DENY")
+})
+
+test("blocks destructive flag case-insensitive", () => {
+  expect(checkSafety("sqlmap", ["--DUMP-ALL"], strict).decision).toBe("DENY")
+})
+
+test("checkSafety treats null constraints as strict (deny-by-default)", () => {
+  expect(checkSafety("sqlmap", ["--os-shell"], null).decision).toBe("DENY")
+})
+
+test("checkSafety treats undefined constraints as strict", () => {
+  expect(checkSafety("sqlmap", ["--os-shell"], undefined).decision).toBe("DENY")
+})

@@ -41,3 +41,30 @@ test("rejects unknown scope_enforcement value", () => {
   const bad = `engagement: x\nauthorization: "y"\nmode: auto\nscope_enforcement: loose`
   expect(() => parseScope(bad)).toThrow(ScopeError)
 })
+
+test("lowercases all domain entries at parse time", () => {
+  const mixedCase = `
+engagement: x
+authorization: "y"
+mode: auto
+scope_enforcement: strict
+in_scope:
+  domains: ["*.Acme.COM", "API.Acme.io"]
+out_of_scope:
+  domains: ["Blog.ACME.com"]
+`
+  const c = parseScope(mixedCase)
+  expect(c.in_scope.domains).toContain("*.acme.com")
+  expect(c.in_scope.domains).toContain("api.acme.io")
+  expect(c.out_of_scope.domains).toContain("blog.acme.com")
+})
+
+test("rejects invalid CIDR (octet >255)", () => {
+  const bad = `engagement: x\nauthorization: "y"\nmode: auto\nscope_enforcement: strict\nin_scope:\n  cidrs: ["300.0.0.0/24"]`
+  expect(() => parseScope(bad)).toThrow(ScopeError)
+})
+
+test("rejects invalid CIDR (malformed)", () => {
+  const bad = `engagement: x\nauthorization: "y"\nmode: auto\nscope_enforcement: strict\nin_scope:\n  cidrs: ["10.0.0.5/32extra"]`
+  expect(() => parseScope(bad)).toThrow(ScopeError)
+})
