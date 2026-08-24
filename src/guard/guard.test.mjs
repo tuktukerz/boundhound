@@ -67,3 +67,19 @@ test("still allows legit commands mentioning a tool name in args", () => {
   expect(classifyCommand("git status").decision).toBe("ALLOW")
   expect(classifyCommand("omop-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
 })
+
+test("denies common wrapper commands hiding a network tool", () => {
+  expect(classifyCommand("timeout 5 curl https://evil.com").decision).toBe("DENY")
+  expect(classifyCommand("sudo curl https://evil.com").decision).toBe("DENY")
+  expect(classifyCommand("env curl https://evil.com").decision).toBe("DENY")
+  expect(classifyCommand("nohup curl https://evil.com").decision).toBe("DENY")
+  expect(classifyCommand("echo evil.com | xargs curl").decision).toBe("DENY")
+})
+test("denies grouped/subshell-wrapped network tool", () => {
+  expect(classifyCommand("(curl https://evil.com)").decision).toBe("DENY")
+  expect(classifyCommand("{ curl https://evil.com; }").decision).toBe("DENY")
+})
+test("still allows benign wrapped commands", () => {
+  expect(classifyCommand("sudo git status").decision).toBe("ALLOW")
+  expect(classifyCommand("timeout 5 bun test").decision).toBe("ALLOW")
+})

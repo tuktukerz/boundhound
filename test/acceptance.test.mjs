@@ -32,8 +32,12 @@ out_of_scope: { domains: ["blog.acme.com"], cidrs: [] }
 safety_constraints: { block_destructive: true, block_dos: true }
 `
 function catalog() {
+  // Must declare the flags used by extraArgs below (e.g. "-I") — runExec
+  // now rejects any extraArgs token that isn't a declared flag for the
+  // tool (closes the target-smuggling hole where a bare URL/host slipped
+  // through extraArgs unchecked).
   return JSON.stringify({ version: "0", tools: [{ tools_name: "curl", description: "d",
-    category: "utility", command: { base: "curl", flags: [], positional: [{ name: "url", required: true }] }, phase: ["utility"] }] })
+    category: "utility", command: { base: "curl", flags: [{ name: "-sS" }, { name: "-I" }], positional: [{ name: "url", required: true }] }, phase: ["utility"] }] })
 }
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "omop-acc-"))

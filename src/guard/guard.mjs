@@ -14,6 +14,11 @@ const NETWORK_BINS = [
   "nikto", "subfinder", "amass", "katana", "dalfox",
 ]
 const INTERPRETERS = ["bash", "sh", "zsh", "dash", "ksh", "python", "python3", "perl", "ruby", "node"]
+// Wrapper commands that re-exec their remaining args as-is (sudo, timeout,
+// env, ...). These must be peeled off before classifying the head token,
+// otherwise `timeout 5 curl ...` / `sudo curl ...` / `env curl ...` etc.
+// sail past the network-bin check disguised as an allowed wrapper.
+const WRAPPERS = new Set(["sudo", "doas", "timeout", "env", "nice", "ionice", "nohup", "setsid", "xargs", "watch"])
 
 function stripQuotes(t) {
   return t.replace(/^['"]+/, "").replace(/['"]+$/, "")
@@ -24,14 +29,35 @@ function isOmopExec(token) {
   return t === "omop-exec" || /(^|\/)omop-exec(\.mjs)?$/.test(t)
 }
 
+// Strips leading grouping/negation characters left over from subshell or
+// brace-group syntax, e.g. "(curl ...)" or "{ curl ...; }", so the head
+// token underneath is still recognized.
+function stripLeadingGroupers(s) {
+  return s.replace(/^[({!]+\s*/, "")
+}
+
 export function classifyCommand(cmd) {
   const text = String(cmd).trim()
   // Split on shell separators, incl. newline and command-substitution openers.
   const parts = text.split(/(?:&&|\|\||;|\||\n|\r|\$\(|`)/).map((p) => p.trim()).filter(Boolean)
-  for (const part of parts) {
+  for (const rawPart of parts) {
+    const part = stripLeadingGroupers(rawPart)
     let tokens = part.split(/\s+/).filter(Boolean)
     // Skip leading KEY=VALUE env assignments.
     while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1)
+    if (!tokens.length) continue
+    // Peel wrapper commands (sudo, timeout, env, nohup, xargs, ...), which
+    // can chain (e.g. `sudo env FOO=bar timeout 5 curl ...`). Re-check for
+    // the wrapper's own flags, timeout's duration argument, and further
+    // env-var assignments after each peel.
+    while (tokens.length) {
+      const w = stripQuotes(tokens[0]).split("/").pop().toLowerCase()
+      if (!WRAPPERS.has(w)) break
+      tokens = tokens.slice(1)
+      while (tokens.length && tokens[0].startsWith("-")) tokens = tokens.slice(1) // skip wrapper's own flags
+      if (w === "timeout" && tokens.length && /^[\d.]+[smhd]?$/.test(tokens[0])) tokens = tokens.slice(1) // timeout's duration arg
+      while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1) // env-vars again (e.g. after `env`)
+    }
     if (!tokens.length) continue
     const headRaw = tokens[0]
     if (isOmopExec(headRaw)) continue // sanctioned path

@@ -14,10 +14,12 @@ function setup(scope) {
   mkdirSync(join(root, "engagements", "acme"), { recursive: true })
   writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
   writeFileSync(join(root, "engagements", ".active"), "acme")
-  // catalog: copy the repo's for curl
+  // catalog: copy the repo's for curl (must actually declare the flags the
+  // tests pass through extraArgs, since runExec now rejects any extraArgs
+  // token that isn't a declared flag — see the target-smuggling fix).
   writeFileSync(join(root, "tools-catalog.json"), JSON.stringify({
     version: "0", tools: [{ tools_name: "curl", description: "d", category: "utility",
-      command: { base: "curl", flags: [], positional: [{ name: "url", required: true }] }, phase: ["utility"] }]
+      command: { base: "curl", flags: [{ name: "-sS" }, { name: "-I" }], positional: [{ name: "url", required: true }] }, phase: ["utility"] }]
   }))
   calls = []
 }
@@ -63,4 +65,14 @@ test("catalog error -> DENY exit 2 (no throw)", () => {
   rmSync(join(root, "tools-catalog.json"))
   const r = runExec(["curl", "--target", "api.acme.io", "--"], { rootDir: root, now, exec })
   expect(r.code).toBe(2)
+})
+
+test("extraArgs cannot smuggle an alternate target past the declared flags", () => {
+  const r = runExec(["curl", "--target", "api.acme.io", "--", "https://evil.com"], { rootDir: root, now, exec })
+  expect(r.code).toBe(2)
+  expect(calls.length).toBe(0)
+})
+test("declared flags still work normally", () => {
+  const r = runExec(["curl", "--target", "api.acme.io", "--", "-I"], { rootDir: root, now, exec })
+  expect(r.code).toBe(0)
 })
