@@ -4,15 +4,15 @@
 
 ---
 
-## 🚧 Status: Phase 3 — Exploitation
+## 🚧 Status: Phase 4 — Verification
 
 ```
 [0] Foundation & Safety   ██████████ done
 [0.5] Plugin packaging    ██████████ done
 [1] Recon                 ██████████ done
 [2] Enumeration           ██████████ done
-[3] Exploitation          ██████████ done   <- you are here
-[4] Verification          ░░░░░░░░░░ not started
+[3] Exploitation          ██████████ done
+[4] Verification          ██████████ done   <- you are here
 [5] Reporting             ░░░░░░░░░░ not started
 [6] Orchestrator          ░░░░░░░░░░ not started
 [7] Expansion             ░░░░░░░░░░ not started
@@ -27,6 +27,8 @@
 **Phase 2 adds enumeration: ffuf and nuclei**, deepening what recon found — still through the same `bh-exec` choke point, with no shortcuts. See **Enumeration** below.
 
 **Phase 3 adds exploitation: sqlmap, in a strictly bounded proof-of-vulnerability mode** — confirming a SQL-injection point is real without ever exfiltrating data, gaining a shell, or touching the filesystem. This is the phase where "fences first, weapons later" gets tested against an actual weapon: sqlmap's own dump/shell/file/eval flags are hard-denied by two independent layers before the tool ever runs. See **Exploitation** below.
+
+**Phase 4 adds verification: no new attack tool.** It consolidates the recon/enum/exploit maps into one normalized, severity-scored, de-duplicated `findings.json`, then actively re-verifies every unverified candidate by re-running its own SAME bounded check — nuclei re-fire, httpx re-probe, or nmap re-scan, never escalated, never sqlmap — through the same `bh-exec` choke point. See **Verification** below.
 
 ## Why this exists
 
@@ -66,7 +68,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 366 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 425 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -191,6 +193,55 @@ confirms a SQL-injection point (DBMS SQLite) and the result lands in
 2, audit-logged) before sqlmap ever runs them — exactly as
 `recon-e2e.test.mjs`/`enum-e2e.test.mjs` do for their own phases.
 
+## Verification
+
+Phase 4 adds no new attack tool. Orchestrated by the self-authored
+`pentest-verify` skill (run via `/verify`), it does two things: **consolidate**
+and **re-verify**.
+
+1. **Consolidate.** `bh-findings` (`bin/bh-findings.mjs`) reads whichever of
+   `recon-map.json`, `enum-map.json`, and `exploit-map.json` already exist
+   for the active engagement and normalizes every entry — open ports, live
+   HTTP services, discovered subdomains/content, nuclei matches, confirmed
+   SQL-injection points — into one `findings.json`, written to
+   `engagements/<name>/output/verify/findings.json`. Each finding gets a
+   stable, deterministic id (a hash of category/type/target/key, not a
+   timestamp or random value), a severity (recon/enum observations are
+   `info`; nuclei carries its own severity; a confirmed sqli finding is
+   always `high`), and de-duplication — the same underlying issue reported
+   more than once collapses to a single finding at its highest observed
+   severity, instead of being counted twice.
+
+2. **Re-verify.** For every candidate that isn't already verified,
+   `pentest-verify` re-screens its target against the engagement's
+   *current* scope and then re-runs that finding's own **same bounded
+   check** — the identical tool, target, and already-cataloged flags that
+   produced it — through `bh-exec`: a narrower nuclei re-fire of just the
+   one template that matched, an httpx re-probe of the exact URL, or an
+   nmap re-scan of the exact host/port. **Never escalated** — no wider port
+   range, no higher concurrency, no new flag — and **sqlmap is never
+   re-run**: a sqli finding is already `verified:true` the moment
+   `pentest-exploit` confirmed it, since exploit's proof-of-vulnerability
+   run already *is* the verification. Recheck output lands under
+   `output/verify/recheck/`, and a second `bh-findings` pass folds it back
+   in, flipping `verified` to `true` (and `confidence` to `"confirmed"`)
+   wherever the check reproduced.
+
+**A finding that no longer reproduces is kept, never dropped** — it stays
+in `findings.json` flagged `verified: false`, because "this no longer
+reproduces" (already fixed, or transient) is itself useful signal, not
+noise to discard.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/verify-e2e.test.mjs`](test/verify-e2e.test.mjs) — which runs a real
+nuclei scan to produce a `verified:false` candidate finding, then drives a
+second real nuclei re-fire against the same target through the actual
+`bh-exec.mjs`/`bh-findings.mjs` CLIs and confirms the finding flips to
+`verified:true` in `findings.json`; a separate case in the same suite
+points the re-check at an out-of-scope target and confirms `bh-exec` DENYs
+it (exit code 2, audit-logged) before nuclei ever runs — exactly the same
+scope enforcement proven for every earlier phase.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -215,7 +266,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 366 pass / 1 skip
+bun test                        # 425 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -235,7 +286,8 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   skills/pentest-recon/    active skill (Phase 1 recon orchestrator: subfinder -> httpx -> nmap -> bh-recon-map)
   skills/pentest-enum/     active skill (Phase 2 enum orchestrator: ffuf -> nuclei -> bh-enum-map)
   skills/pentest-exploit/  active skill (Phase 3 exploit orchestrator: sqlmap -> bh-exploit-map, bounded proof-of-vuln)
-  commands/                /engagement, /mode, /recon, /enum, /exploit
+  skills/pentest-verify/   active skill (Phase 4 verify orchestrator: bh-findings -> re-check via bh-exec -> bh-findings)
+  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
@@ -243,6 +295,7 @@ bin/
   bh-recon-map.mjs       merges subfinder/httpx/nmap output into recon-map.json
   bh-enum-map.mjs        merges ffuf/nuclei output into enum-map.json
   bh-exploit-map.mjs     merges sqlmap output into exploit-map.json
+  bh-findings.mjs        consolidates recon/enum/exploit maps + verify rechecks into findings.json
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -257,6 +310,7 @@ src/
   recon/                   recon-map.mjs: normalizes subfinder/httpx/nmap output into recon-map.json
   enum/                    enum-map.mjs: normalizes ffuf/nuclei output into enum-map.json
   exploit/                 exploit-map.mjs: normalizes sqlmap output into exploit-map.json
+  verify/                  findings.mjs: consolidates recon/enum/exploit maps + applies re-verification into findings.json
 docker/
   Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2) + sqlmap (Phase 3)
   wordlists/               bundled wordlist for ffuf content discovery
