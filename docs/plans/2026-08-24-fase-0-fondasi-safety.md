@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bangun kerangka repo bergaya OmOP + lapisan safety yang benar-benar dipaksa (scope enforcement deny-by-default via hook Claude Code), tanpa satu pun tool serang.
+**Goal:** Bangun kerangka repo Boundhound + lapisan safety yang benar-benar dipaksa (scope enforcement deny-by-default via hook Claude Code), tanpa satu pun tool serang.
 
 **Architecture:** Logika inti (scope matcher, safety check, catalog loader, command-builder, guard, audit) ditulis sebagai modul **Node ESM `.mjs`** murni — tanpa build step, bisa di-`import` langsung oleh hook & CLI. Enforcement dua lapis: hook `PreToolUse` (cegah bypass) + `bin/bh-exec` (cek scope+safety sebenarnya sebelum `docker exec`). Semua tervalidasi lewat `bun test`.
 
@@ -15,7 +15,7 @@
 - **Deny-by-default.** Target tak cocok `in_scope` eksplisit → DENY. Ragu → DENY. (spec §3.1)
 - **Fail-closed.** Engagement tak aktif / `scope.yaml` rusak → DENY semua. (spec §3.2)
 - **Nol tool serang.** Fase 0 TIDAK memasang nmap/nuclei/sqlmap/dst. Hanya `curl` sebagai tool uji jembatan. (spec §1 Non-Tujuan)
-- **Ikut pola OmOP.** Skill = frontmatter OmOP; tool = schema `ToolEntry`; command = format `<command-instruction>`. (spec §2)
+- **Ikut pola repo.** Skill = frontmatter skill; tool = schema `ToolEntry`; command = format `<command-instruction>`. (spec §2)
 - **Runtime = Node ESM `.mjs`, tes = `bun test`.** Tanpa build step. Hook di-run via `node`.
 - **Timestamp diinjeksi**, bukan diambil di dalam fungsi murni (untuk testability & kejujuran audit). (spec §4.7)
 - **out_of_scope menang** atas `in_scope`. (spec §4.2)
@@ -581,14 +581,14 @@ git commit -m "feat(safety): destructive/DoS constraint checker"
 
 ---
 
-### Task 6: Tools catalog loader (schema ToolEntry OmOP)
+### Task 6: Tools catalog loader (schema ToolEntry)
 
 **Files:**
 - Create: `src/catalog/catalog-loader.mjs`, `tools-catalog.json`
 - Test: `src/catalog/catalog-loader.test.mjs`
 
 **Interfaces:**
-- Produces: `loadCatalog(path) -> {version, tools: ToolEntry[]}` (throws `CatalogError`). `findTool(catalog, name) -> ToolEntry|null`. `ToolEntry` mengikuti OmOP: `{tools_name, description, category, command:{base, flags:[], positional:[]}, phase:[], tags:[], requires_root, output_format:[]}`.
+- Produces: `loadCatalog(path) -> {version, tools: ToolEntry[]}` (throws `CatalogError`). `findTool(catalog, name) -> ToolEntry|null`. `ToolEntry` = `{tools_name, description, category, command:{base, flags:[], positional:[]}, phase:[], tags:[], requires_root, output_format:[]}`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1405,25 +1405,25 @@ git commit -m "feat(docker): lean base image + container lifecycle + bridge smok
 
 ---
 
-### Task 14: Commands + `pentest-mode` skill (panen dari OmOP)
+### Task 14: Commands + `pentest-mode` skill
 
 **Files:**
 - Create: `.claude/commands/engagement.md`, `.claude/commands/mode.md`, `.claude/skills/pentest-mode/SKILL.md`
-- Modify: (harvest) copy `skills-library/pentest-mode/SKILL.md` dari OmOP terlebih dulu
+- Create: `skills-library/pentest-mode/SKILL.md` (skill sumber, ditulis untuk Boundhound)
 
 **Interfaces:**
 - Produces: slash command `/engagement`, `/mode`; skill aktif `pentest-mode` (di-tuning ke config kita).
 
-- [ ] **Step 1: Harvest the source skill into the library**
+- [ ] **Step 1: Author the source skill in the library**
 
 ```bash
 mkdir -p skills-library/pentest-mode
-curl -s "https://raw.githubusercontent.com/zakirkun/oh-my-open-pentest/HEAD/.agents/skills/pentest-mode/SKILL.md" \
-  -o skills-library/pentest-mode/SKILL.md
+# Tulis skill pentest-mode untuk Boundhound di skills-library/pentest-mode/SKILL.md
+# (frontmatter: name, description+Triggers, phase, category, tags; body = resep bash konkret)
 test -s skills-library/pentest-mode/SKILL.md && echo OK
 ```
 
-- [ ] **Step 2: Write the command files (format OmOP)**
+- [ ] **Step 2: Write the command files (format command)**
 
 ```markdown
 <!-- .claude/commands/engagement.md -->
@@ -1462,9 +1462,9 @@ $ARGUMENTS
 </user-request>
 ```
 
-- [ ] **Step 3: Tune the harvested skill into the active skill**
+- [ ] **Step 3: Promote the source skill into the active skill**
 
-Copy `skills-library/pentest-mode/SKILL.md` → `.claude/skills/pentest-mode/SKILL.md`, lalu edit frontmatter + body agar cocok dengan config kita: referensi `scope.yaml` (bukan config OpenCode), `scope_enforcement` di-*enforce* hook, dan skill-chain diarahkan ke fase kita. Pertahankan format frontmatter OmOP (`name`, `description`+`Triggers:`, `phase`, `category`, `tags`).
+Copy `skills-library/pentest-mode/SKILL.md` → `.claude/skills/pentest-mode/SKILL.md`, lalu edit frontmatter + body agar cocok dengan config kita: referensi `scope.yaml`, `scope_enforcement` di-*enforce* hook, dan skill-chain diarahkan ke fase kita. Pertahankan format frontmatter skill (`name`, `description`+`Triggers:`, `phase`, `category`, `tags`).
 
 - [ ] **Step 4: Verify skill is well-formed**
 
@@ -1580,7 +1580,7 @@ git commit -m "test: Fase 0 acceptance suite (spec T1-T12) — safety proven"
 ## Self-Review
 
 **1. Spec coverage:**
-- §2 pola OmOP → Task 6 (catalog `ToolEntry`), Task 14 (skill frontmatter + command format). ✅
+- §2 pola repo → Task 6 (catalog `ToolEntry`), Task 14 (skill frontmatter + command format). ✅
 - §3 prinsip (deny-by-default, fail-closed, enforcement, auditable) → Tasks 3,4,9,10,8. ✅
 - §4.2 scope.yaml → Task 2 (+ template Task 12). ✅
 - §4.3 catalog / §4.4 command-builder → Tasks 6,7. ✅

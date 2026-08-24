@@ -3,14 +3,14 @@
 **Tanggal:** 2026-08-24
 **Status:** draft, menunggu review
 **Prasyarat:** tidak ada (fase pertama)
-**Prinsip pemandu:** **ikut pola repo rujukan (OmOP)**, tambahkan "teeth" di titik safety sebagai upgrade.
+**Prinsip pemandu:** **tetapkan konvensi repo Boundhound sendiri**, dengan "teeth" di titik safety.
 
 ---
 
 ## 1. Tujuan & Non-Tujuan
 
 ### Tujuan
-Membangun **kerangka repo bergaya OmOP** + **lapisan keamanan yang benar-benar dipaksa**: engagement config (mode + scope), katalog tool deklaratif, jembatan Docker, audit log, dan hook yang memblokir perintah ke luar scope. Semua mengikuti konvensi OmOP; bedanya, `scope_enforcement: strict` di sini **ditegakkan mesin**, bukan sekadar diminta ke agent.
+Membangun **kerangka repo Boundhound** + **lapisan keamanan yang benar-benar dipaksa**: engagement config (mode + scope), katalog tool deklaratif, jembatan Docker, audit log, dan hook yang memblokir perintah ke luar scope. `scope_enforcement: strict` di sini **ditegakkan mesin**, bukan sekadar diminta ke agent.
 
 ### Non-Tujuan (TEGAS)
 - ❌ **Nol kemampuan serang/recon.** Tidak ada tool pentest nyata (nmap/nuclei/dst). Itu Fase 1+.
@@ -21,19 +21,19 @@ Membangun **kerangka repo bergaya OmOP** + **lapisan keamanan yang benar-benar d
 
 ---
 
-## 2. Pola OmOP yang Diadopsi (jangan ngarang sendiri)
+## 2. Pola & Konvensi Repo
 
-| Aspek | Pola OmOP yang kita ikuti |
+| Aspek | Pola repo yang kita pakai |
 |---|---|
 | Skill | Frontmatter `name` / `description`(+`Triggers:`) / `version` / `phase` / `category` / `tools` / `tags`, body = resep bash konkret |
 | Nama skill fase | `pentest-mode`, `pentest-recon`, `pentest-enum`, `pentest-exploit`, `pentest-report`, `pentest-workflow` |
 | Tool | `tools-catalog.json` deklaratif (schema `ToolEntry`) + `command-builder` yang menyusun perintah dari flags |
 | Mode | `ModeConfig` (`scope_enforcement`, `tool_priority`, `skill_chain`, `parallelism`, `stealth`, `report_format`, `safety_constraints`) |
 | Command | File `.md`: frontmatter `description:` + `<command-instruction>` yang me-load skill + `<user-request>$ARGUMENTS</user-request>` |
-| Arsip skill | 250 SKILL.md OmOP disimpan mentah di `skills-library/`, dipromosikan per-fase |
+| Library skill | SKILL.md ditulis sendiri, disimpan di `skills-library/`, dipromote ke skill aktif per-fase |
 
-**Yang bukan pola OmOP & sengaja kita TAMBAH (ini "upgrade"-nya):**
-- Hook Claude Code `PreToolUse` yang **menegakkan** `scope_enforcement: strict` (deny-by-default). OmOP menyerahkannya ke kepatuhan agent; kita paksa di mesin.
+**Yang jadi fokus safety Boundhound:**
+- Hook Claude Code `PreToolUse` yang **menegakkan** `scope_enforcement: strict` (deny-by-default) — dipaksa di mesin, bukan sekadar imbauan ke agent.
 - Audit log chain-of-custody per engagement.
 
 ---
@@ -49,13 +49,13 @@ Membangun **kerangka repo bergaya OmOP** + **lapisan keamanan yang benar-benar d
 
 ## 4. Komponen Fase 0
 
-### 4.1 Struktur repo (gaya OmOP)
+### 4.1 Struktur repo
 
 ```
 boundhound/
 ├── .claude/
 │   ├── settings.json          # daftarkan hook PreToolUse
-│   ├── commands/              # /engagement, /mode  (format OmOP)
+│   ├── commands/              # /engagement, /mode  (format command)
 │   └── skills/                # skill AKTIF (Fase 0: hanya pentest-mode)
 ├── bin/
 │   ├── bh-exec              # jembatan: bangun cmd dari katalog → docker exec
@@ -63,10 +63,10 @@ boundhound/
 ├── hooks/
 │   └── scope-guard.mjs        # enforcement PreToolUse (deny-by-default)
 ├── src/
-│   ├── catalog/               # loader tools-catalog.json (adopsi pola OmOP)
+│   ├── catalog/               # loader tools-catalog.json (pola repo)
 │   └── command-builder/       # bangun perintah dari ToolEntry.flags
 ├── tools-catalog.json         # registry tool deklaratif (Fase 0: 1 tool uji)
-├── skills-library/            # arsip 250 SKILL.md OmOP (referensi)
+├── skills-library/            # library skill (ditulis sendiri)
 ├── engagements/
 │   ├── .active                # pointer engagement aktif
 │   └── <name>/
@@ -77,22 +77,22 @@ boundhound/
 └── docs/
 ```
 
-### 4.2 `scope.yaml` — engagement config (bentuk mengikuti `ModeConfig` OmOP)
+### 4.2 `scope.yaml` — engagement config (bentuk mengikuti `ModeConfig`)
 
-Satu file per engagement. Menggabungkan mode-config OmOP + daftar target (tambahan kita).
+Satu file per engagement. Menggabungkan mode-config + daftar target.
 
 ```yaml
 engagement: acme-bugbounty
 authorization: "HackerOne #12345"      # wajib; dicatat ke audit
 mode: bug-bounty                        # auto|ctf|bug-bounty|red-team|blue-team|offensive|grey-hat
-scope_enforcement: strict               # strict|moderate|none  (OmOP)
+scope_enforcement: strict               # strict|moderate|none
 in_scope:
   domains: ["*.acme.com", "api.acme.io"]
   cidrs:   ["203.0.113.0/24"]
 out_of_scope:                           # menang atas in_scope
   domains: ["blog.acme.com", "*.corp.acme.com"]
   cidrs:   ["203.0.113.5/32"]
-safety_constraints:                     # OmOP SafetyConfig
+safety_constraints:                     # SafetyConfig
   block_destructive: true               # blok dump masif / os-shell / write
   block_dos: true                       # blok intensitas bau DoS
 rate_limit: 10
@@ -101,11 +101,11 @@ notes: "Prod. Jangan sentuh corp."
 
 Pencocokan (di hook & `bh-exec`): normalisasi target → cek `out_of_scope` (tolak) → cek `in_scope` (izin) → selain itu tolak.
 
-### 4.3 `tools-catalog.json` (adopsi schema OmOP)
+### 4.3 `tools-catalog.json` (schema `ToolEntry`)
 
-Pakai schema `ToolEntry` OmOP apa adanya (`tools_name`, `category`, `command{base,flags,positional,pipes}`, `installation{linux/darwin/win32}`, `check_installed`, `skills_loader`, `phase[]`, `tags`, `requires_root`, `output_format[]`). **Fase 0** hanya memuat **satu tool uji tak berbahaya** (mis. `curl`) untuk membuktikan pipeline; tool nyata masuk per-fase.
+Pakai schema `ToolEntry` apa adanya (`tools_name`, `category`, `command{base,flags,positional,pipes}`, `installation{linux/darwin/win32}`, `check_installed`, `skills_loader`, `phase[]`, `tags`, `requires_root`, `output_format[]`). **Fase 0** hanya memuat **satu tool uji tak berbahaya** (mis. `curl`) untuk membuktikan pipeline; tool nyata masuk per-fase.
 
-### 4.4 `command-builder` (adopsi pola OmOP)
+### 4.4 `command-builder` (pola repo)
 
 Menyusun perintah final dari `ToolEntry.command` + flags. Fase 0 cukup versi minimal (cukup untuk tool uji); diperkaya di Fase 1 saat recon tool masuk.
 
@@ -130,10 +130,10 @@ Hook `PreToolUse` untuk tool **Bash**, didaftarkan di `.claude/settings.json`. L
 ### 4.7 Audit log
 `bh-exec` append JSON-per-baris ke `engagements/<t>/audit.log`: `ts, target, tool, decision, reason, authorization`. Timestamp diambil skrip (bukan agent).
 
-### 4.8 Commands (format OmOP)
+### 4.8 Commands (format command)
 - `.claude/commands/engagement.md` → load skill `pentest-mode`, tuntun user isi `scope.yaml`, panggil `bh-engagement`.
 - `.claude/commands/mode.md` → set `mode` + `scope_enforcement` di engagement aktif.
-- Skill aktif Fase 0: **hanya `pentest-mode`** (dipanen dari OmOP, di-tuning ke config kita).
+- Skill aktif Fase 0: **hanya `pentest-mode`** (ditulis sendiri, di-tuning ke config kita).
 
 ---
 
@@ -162,7 +162,7 @@ Semua harus hijau (tes otomatis, target uji = domain contoh/loopback, tanpa jari
 - Katalog `safety_constraints` lengkap → per-fase saat tool masuk.
 - `command-builder` penuh (banyak flag) → Fase 1.
 - Auto-detect mode dari target → Fase 6.
-- (Opsional) egress-lock jaringan container sebagai hardening ekstra → Fase 6/7, **bukan** Fase 0 (di luar pola OmOP).
+- (Opsional) egress-lock jaringan container sebagai hardening ekstra → Fase 6/7, **bukan** Fase 0 (di luar pola repo Fase 0).
 
 ---
 

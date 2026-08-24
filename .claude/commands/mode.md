@@ -1,11 +1,11 @@
 ---
-description: Set engagement mode + scope_enforcement pada engagement aktif
+description: Set engagement mode + scope_enforcement on the active engagement
 ---
 
 <command-instruction>
-Load and follow the `pentest-mode` skill. Update `mode` dan `scope_enforcement`
-pada `engagements/<aktif>/scope.yaml` sesuai argumen (auto|ctf|bug-bounty|red-team|blue-team|offensive|grey-hat).
-Jangan pernah set `scope_enforcement: none` untuk target selain lab/CTF milik sendiri.
+Load and follow the `pentest-mode` skill. Update `mode` and `scope_enforcement`
+on `engagements/<active>/scope.yaml` per the argument (auto|ctf|bug-bounty|red-team|blue-team|offensive|grey-hat).
+Never set `scope_enforcement: none` for any target other than a lab/CTF target you own.
 </command-instruction>
 
 <user-request>

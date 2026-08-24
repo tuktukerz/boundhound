@@ -1,0 +1,5 @@
+{"host":"api.acme.io","input":"acme.io","source":"crtsh"}
+{"host":"www.acme.io","input":"acme.io","source":"virustotal"}
+
+not-json-garbage
+{"host":"admin.acme.io","input":"acme.io","source":"dnsdumpster"}

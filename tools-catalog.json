@@ -1,11 +1,11 @@
 {
   "$schema": "./docs/tools-catalog.schema.json",
   "version": "0.0.0",
-  "categories": ["utility"],
+  "categories": ["utility", "recon"],
   "tools": [
     {
       "tools_name": "curl",
-      "description": "HTTP client — Fase 0 bridge test tool only",
+      "description": "HTTP client — Phase 0 bridge test tool only",
       "category": "utility",
       "command": {
         "base": "curl",
@@ -24,6 +24,98 @@
       "tags": ["http", "bridge-test"],
       "requires_root": false,
       "output_format": ["text"]
+    },
+    {
+      "tools_name": "subfinder",
+      "description": "Passive subdomain enumeration",
+      "category": "recon",
+      "command": {
+        "base": "subfinder",
+        "target_flag": "-d",
+        "flags": [
+          { "name": "-silent", "type": "boolean", "description": "silent output" },
+          { "name": "-json", "type": "boolean", "description": "JSON lines output" }
+        ]
+      },
+      "installation": {
+        "linux": {
+          "command": "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.6",
+          "manager": "go"
+        }
+      },
+      "check_installed": { "command": "subfinder -version", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["recon"],
+      "tags": ["subdomain-enum", "passive", "dns"],
+      "requires_root": false,
+      "output_format": ["jsonl"]
+    },
+    {
+      "tools_name": "httpx",
+      "description": "HTTP probe with tech/title/status-code detection",
+      "category": "recon",
+      "command": {
+        "base": "httpx",
+        "target_flag": "-u",
+        "flags": [
+          { "name": "-silent", "type": "boolean", "description": "silent output" },
+          { "name": "-json", "type": "boolean", "description": "JSON lines output" },
+          { "name": "-td", "type": "boolean", "description": "tech detect" },
+          { "name": "-title", "type": "boolean", "description": "show page title" },
+          { "name": "-sc", "type": "boolean", "description": "show status code" }
+        ]
+      },
+      "installation": {
+        "linux": {
+          "command": "go install github.com/projectdiscovery/httpx/cmd/httpx@v1.6.9",
+          "manager": "go"
+        }
+      },
+      "check_installed": { "command": "httpx -version", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["recon"],
+      "tags": ["http-probe", "tech-detect"],
+      "requires_root": false,
+      "output_format": ["jsonl"]
+    },
+    {
+      "tools_name": "nmap",
+      "description": "Port and service/version scan",
+      "category": "recon",
+      "command": {
+        "base": "nmap",
+        "flags": [
+          { "name": "-sT", "type": "boolean", "description": "TCP connect scan (rootless)" },
+          { "name": "-sV", "type": "boolean", "description": "service/version detection" },
+          { "name": "-Pn", "type": "boolean", "description": "skip host discovery" },
+          { "name": "-T3", "type": "boolean", "description": "normal timing template" },
+          { "name": "-T4", "type": "boolean", "description": "aggressive timing template" },
+          {
+            "name": "-p",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$",
+            "description": "port spec"
+          },
+          {
+            "name": "-oG",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^-$",
+            "description": "grepable output to stdout"
+          }
+        ],
+        "positional": [
+          { "name": "target", "type": "string", "description": "target host/CIDR", "required": true }
+        ]
+      },
+      "installation": { "linux": { "command": "apt-get install -y nmap", "manager": "apt" } },
+      "check_installed": { "command": "nmap --version", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["recon"],
+      "tags": ["port-scan", "service-detection"],
+      "requires_root": false,
+      "output_format": ["grepable"]
     }
   ]
 }

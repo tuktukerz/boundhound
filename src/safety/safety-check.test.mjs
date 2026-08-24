@@ -46,3 +46,61 @@ test("checkSafety treats null constraints as strict (deny-by-default)", () => {
 test("checkSafety treats undefined constraints as strict", () => {
   expect(checkSafety("sqlmap", ["--os-shell"], undefined).decision).toBe("DENY")
 })
+
+// Task 3: nmap-shaped DoS guards (spec §2.3). The flag=value/spaced-value
+// numeric checks below are case-insensitive; the -T5 literal deny (T3a) is
+// the exception — it is case-SENSITIVE by design (see the DOS_LITERAL
+// comment in safety-check.mjs: uppercase -T5 is nmap's timing template,
+// lowercase -t/-t5 is the unrelated threads flag).
+
+test("T3a: blocks nmap -T5 (insane timing) when block_dos on", () => {
+  const r = checkSafety("nmap", ["-T5"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T3b: allows nmap -T4 (normal timing)", () => {
+  expect(checkSafety("nmap", ["-T4"], strict).decision).toBe("ALLOW")
+})
+
+test("T3c: blocks nmap --min-rate above cap (spaced form)", () => {
+  const r = checkSafety("nmap", ["--min-rate", "100000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T3d: blocks nmap --min-rate above cap (=value form)", () => {
+  const r = checkSafety("nmap", ["--min-rate=100000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T3e: allows nmap --min-rate under cap", () => {
+  expect(checkSafety("nmap", ["--min-rate", "100"], strict).decision).toBe("ALLOW")
+})
+
+test("T3e2: blocks nmap --max-rate above cap (spaced form)", () => {
+  const r = checkSafety("nmap", ["--max-rate", "100000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T3e3: blocks nmap --max-rate above cap (=value form)", () => {
+  const r = checkSafety("nmap", ["--max-rate=100000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T3f: allows -p (port spec) - not a DoS flag", () => {
+  expect(checkSafety("nmap", ["-p", "1-1000"], strict).decision).toBe("ALLOW")
+})
+
+test("T3g: existing -t 5000 still DENYs (regression)", () => {
+  expect(checkSafety("ffuf", ["-t", "5000"], strict).decision).toBe("DENY")
+})
+
+test("T3h: lowercase -t5 (glued, 5 threads) ALLOWs - -T5 deny is case-sensitive, not confused with threads flag", () => {
+  const r = checkSafety("ffuf", ["-t5"], strict)
+  expect(r.decision).toBe("ALLOW")
+  expect(r.reason).toBe("safety-ok")
+})

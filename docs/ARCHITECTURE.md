@@ -1,17 +1,17 @@
 # Boundhound — Arsitektur & Roadmap
 
 **Autonomous Pentest Agent di atas Claude Code.**
-Terinspirasi & memanen skill dari [`zakirkun/oh-my-open-pentest`](https://github.com/zakirkun/oh-my-open-pentest) (OmOP), tapi dibangun ulang sebagai native Claude Code — bukan plugin OpenCode.
+Proyek original, dibangun native sebagai Claude Code — orchestrator, safety layer, dan library skill semuanya ditulis sendiri.
 
 > Status: **Fase 0 — perencanaan.** Belum ada kode implementasi. Dokumen ini + `docs/specs/` adalah satu-satunya artefak sejauh ini.
 
 ---
 
-## 1. Kenapa dibangun ulang, bukan fork
+## 1. Kenapa native Claude Code
 
-OmOP terikat ke OpenCode (entry point-nya plugin OpenCode; tidak ada edisi Claude Code). Yang berharga & portable dari OmOP adalah **250 `SKILL.md`** — markdown playbook murni. Yang tidak kita bawa adalah plumbing OpenCode-nya (tool runner, orchestrator, config).
+Boundhound dibangun native di atas primitives Claude Code. Aset intinya adalah **library `SKILL.md`** — markdown playbook murni yang ditulis sendiri, dipromosikan ke skill aktif per-fase. Orchestrator, tool runner, dan config semuanya versi kita sendiri.
 
-**Keputusan (Opsi B):** perlakukan OmOP sebagai **tambang bahan baku + acuan**. Panen skill-nya, bangun orchestrator + safety layer versi kita sendiri di atas primitives Claude Code.
+**Keputusan (Opsi B):** simpan playbook sebagai library skill yang ditulis sendiri, lalu bangun orchestrator + safety layer di atas primitives Claude Code.
 
 ---
 
@@ -27,10 +27,10 @@ Dua metrik yang tidak bisa ditawar: **(1)** output = report yang beneran kepakai
 
 | Konsep pentest agent | Diwujudkan pakai |
 |---|---|
-| Skill playbook (recon, xss, sqli, dst) | Frontmatter OmOP + `.claude/skills/*/SKILL.md` (aktif) + `skills-library/` (arsip 250) |
-| Registry tool | `tools-catalog.json` (schema `ToolEntry` OmOP) + `command-builder` |
+| Skill playbook (recon, xss, sqli, dst) | Frontmatter skill + `.claude/skills/*/SKILL.md` (aktif) + `skills-library/` (library skill) |
+| Registry tool | `tools-catalog.json` (schema `ToolEntry`) + `command-builder` |
 | Eksekusi tool (nmap, nuclei, sqlmap) | `bin/bh-exec` → `docker exec` ke container Linux |
-| Tool via MCP (mis. Burp Suite) | MCP server native Claude Code (on-pattern; OmOP juga pakai MCP) — lihat §7 |
+| Tool via MCP (mis. Burp Suite) | MCP server native Claude Code (on-pattern) — lihat §7 |
 | Orchestrator (recon→…→report) | Master skill yang menyetir **subagents** per fase |
 | `/engagement`, `/fullscan` | `.claude/commands/*.md` |
 | Engagement mode | Skill / argumen command |
@@ -46,7 +46,7 @@ Dua metrik yang tidak bisa ditawar: **(1)** output = report yang beneran kepakai
 
 | # | Keputusan | Nilai |
 |---|---|---|
-| Arah | Bangun sendiri; OmOP = tambang skill + acuan | Opsi B |
+| Arah | Bangun sendiri, native Claude Code | Opsi B |
 | Tujuan | Belajar + kerjaan beneran + portfolio | bar "kerjaan beneran" |
 | Legal | Engagement resmi + bug bounty + lab sendiri | (a)+(b)+(c) |
 | Platform | Claude Code | fixed |
@@ -56,7 +56,7 @@ Dua metrik yang tidak bisa ditawar: **(1)** output = report yang beneran kepakai
 | Pagar 1 | Scope hook keras, **deny-by-default** | wajib |
 | Pagar 2 | Safety profile — blok aksi destruktif/DoS by default | wajib |
 | Scope | `scope.yaml` per engagement | Q9 |
-| Skill | Panen 250 → `skills-library/`, promosi per-fase + tuning | Q3, Q12=b |
+| Skill | Library skill di `skills-library/` (ditulis sendiri), promosi per-fase + tuning | Q3, Q12=b |
 | Model | Campur per-fase (cepat buat recon/enum, Opus buat exploit/verify/report) | Q10=b |
 | Lokasi | Repo git baru `~/Documents/ian/boundhound` | Q13 |
 | Urutan | **Fase 0 (safety) duluan**, wajib | Q14 |
@@ -88,7 +88,7 @@ Tiap fase = milestone berdiri sendiri dengan siklus **spec → plan → implemen
 boundhound/
 ├── .claude/
 │   ├── settings.json        # daftarkan hook PreToolUse (scope-guard)
-│   ├── commands/            # /engagement, /mode, ... (format OmOP)
+│   ├── commands/            # /engagement, /mode, ... (format command)
 │   └── skills/              # skill AKTIF (dipromosikan per-fase)
 ├── bin/
 │   ├── bh-exec            # bangun cmd dari katalog → scope+safety → docker exec
@@ -96,11 +96,11 @@ boundhound/
 ├── hooks/
 │   └── scope-guard.mjs      # enforcement PreToolUse; cegah bypass bh-exec
 ├── src/
-│   ├── catalog/             # loader tools-catalog.json (pola OmOP)
+│   ├── catalog/             # loader tools-catalog.json (pola repo)
 │   └── command-builder/     # bangun perintah dari ToolEntry.flags
 ├── tools-catalog.json       # registry tool deklaratif (schema ToolEntry)
 ├── docker/Dockerfile        # base ramping; tool ditambah per-fase
-├── skills-library/          # arsip 250 skill OmOP (referensi, tidak di-load)
+├── skills-library/          # library skill (ditulis sendiri, tidak di-load)
 ├── engagements/
 │   ├── .active              # pointer ke engagement aktif
 │   └── <target>/
@@ -114,7 +114,7 @@ boundhound/
 
 ## 7. Integrasi MCP (mis. Burp Suite)
 
-Claude Code mendukung MCP server native, dan OmOP juga dibangun di atas MCP — jadi menambah tool lewat MCP itu **on-pattern**. **Burp Suite** punya MCP server resmi yang cocok banget untuk web/bug-bounty (Proxy, Repeater, Scanner). Rencana penempatan: **Fase 2–3 (enum/exploit)**, BUKAN Fase 0.
+Claude Code mendukung MCP server native — jadi menambah tool lewat MCP itu **on-pattern**. **Burp Suite** punya MCP server resmi yang cocok banget untuk web/bug-bounty (Proxy, Repeater, Scanner). Rencana penempatan: **Fase 2–3 (enum/exploit)**, BUKAN Fase 0.
 
 Catatan penting saat dipakai:
 - Butuh Burp jalan (Burp **Pro** untuk active scan; Community terbatas). Burp jalan di **host**, bukan di container tool.
