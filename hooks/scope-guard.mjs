@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { classifyCommand } from "../src/guard/guard.mjs"
 import { activeName } from "../src/scope/active-engagement.mjs"
 import { appendAudit } from "../src/audit/audit-log.mjs"
+import { dataRoot } from "../src/paths.mjs"
 
 const NETWORK_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SCOPE_FILE_RE = /engagements\/[^/]+\/scope\.yaml$/
@@ -72,7 +73,7 @@ if (isMain) {
     out = failClosed("hook error (fail-closed)")
   }
   if (out.hookSpecificOutput.permissionDecision === "deny") {
-    auditHookDeny(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), {
+    auditHookDeny(dataRoot(), {
       tool: event.tool_name,
       detail: event.tool_input?.command ?? event.tool_input?.file_path ?? event.tool_input?.url ?? null,
       reason: out.hookSpecificOutput.permissionDecisionReason,

@@ -1,6 +1,6 @@
 // bin/omop-exec.test.mjs
 import { test, expect, beforeEach } from "bun:test"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runExec } from "./omop-exec.mjs"
@@ -75,4 +75,40 @@ test("extraArgs cannot smuggle an alternate target past the declared flags", () 
 test("declared flags still work normally", () => {
   const r = runExec(["curl", "--target", "api.acme.io", "--", "-I"], { rootDir: root, now, exec })
   expect(r.code).toBe(0)
+})
+
+// P3: split codeDir/dataDir must behave identically to the single-rootDir
+// case above — same ALLOW/DENY decisions, audit still lands under dataDir.
+function setupSplit(scope) {
+  const codeDir = mkdtempSync(join(tmpdir(), "omop-exec-code-"))
+  writeFileSync(join(codeDir, "tools-catalog.json"), JSON.stringify({
+    version: "0", tools: [{ tools_name: "curl", description: "d", category: "utility",
+      command: { base: "curl", flags: [{ name: "-sS" }, { name: "-I" }], positional: [{ name: "url", required: true }] }, phase: ["utility"] }]
+  }))
+  const dataDir = mkdtempSync(join(tmpdir(), "omop-exec-data-"))
+  mkdirSync(join(dataDir, "engagements", "acme"), { recursive: true })
+  writeFileSync(join(dataDir, "engagements", "acme", "scope.yaml"), scope)
+  writeFileSync(join(dataDir, "engagements", ".active"), "acme")
+  return { codeDir, dataDir }
+}
+
+test("P3: split codeDir/dataDir -> in-scope target ALLOW, exec called, audit under dataDir", () => {
+  const { codeDir, dataDir } = setupSplit(scope)
+  calls = []
+  const r = runExec(["curl", "--target", "api.acme.io", "--", "-I"], { codeDir, dataDir, now, exec })
+  expect(r.code).toBe(0)
+  expect(calls.length).toBe(1)
+  expect(calls[0]).toContain("api.acme.io")
+  const audit = readFileSync(join(dataDir, "engagements", "acme", "audit.log"), "utf8")
+  expect(audit).toMatch(/"decision":"ALLOW"/)
+})
+
+test("P3: split codeDir/dataDir -> out-of-scope target DENY exit 2, no exec", () => {
+  const { codeDir, dataDir } = setupSplit(scope)
+  calls = []
+  const r = runExec(["curl", "--target", "evil.com", "--"], { codeDir, dataDir, now, exec })
+  expect(r.code).toBe(2)
+  expect(calls.length).toBe(0)
+  const audit = readFileSync(join(dataDir, "engagements", "acme", "audit.log"), "utf8")
+  expect(audit).toMatch(/"decision":"DENY"/)
 })

@@ -8,6 +8,7 @@ import { checkSafety } from "../src/safety/safety-check.mjs"
 import { loadCatalog, findTool } from "../src/catalog/catalog-loader.mjs"
 import { buildCommand } from "../src/command-builder/command-builder.mjs"
 import { appendAudit } from "../src/audit/audit-log.mjs"
+import { codeRoot, dataRoot } from "../src/paths.mjs"
 
 // argv: [tool, "--target", <t>, "--", ...extraArgs]
 function parse(argv) {
@@ -32,13 +33,15 @@ const dockerExec = (name, cmdArray) => {
   return typeof r.status === "number" ? r.status : 1
 }
 
-export function runExec(argv, { rootDir, now, exec } = {}) {
+export function runExec(argv, { rootDir, codeDir, dataDir, now, exec } = {}) {
+  const cDir = codeDir ?? rootDir ?? codeRoot()
+  const dDir = dataDir ?? rootDir ?? dataRoot()
   const stamp = (now ?? (() => new Date().toISOString()))()
 
   let cfg, cfgName
   try {
-    cfg = loadActiveConfig(rootDir)
-    cfgName = activeName(rootDir)
+    cfg = loadActiveConfig(dDir)
+    cfgName = activeName(dDir)
   } catch (e) {
     return { code: 3, message: `fail-closed: ${e.message}` }
   }
@@ -49,7 +52,7 @@ export function runExec(argv, { rootDir, now, exec } = {}) {
   const runner = exec ?? ((cmdArray) => dockerExec(`omop-${cfgName}`, cmdArray))
 
   const { tool, target, extraArgs } = parse(argv)
-  const auditPath = join(rootDir, "engagements", cfgName, "audit.log")
+  const auditPath = join(dDir, "engagements", cfgName, "audit.log")
   const deny = (reason) => {
     appendAudit(auditPath, { ts: stamp, target, tool, decision: "DENY", reason, authorization: cfg.authorization })
     return { code: 2, message: `DENY ${reason}` }
@@ -70,7 +73,7 @@ export function runExec(argv, { rootDir, now, exec } = {}) {
   // default non-zero exit, no audit line).
   let entry
   try {
-    const catalog = loadCatalog(join(rootDir, "tools-catalog.json"))
+    const catalog = loadCatalog(join(cDir, "tools-catalog.json"))
     entry = findTool(catalog, tool)
   } catch (e) {
     return deny(`catalog-error: ${e.message}`)
@@ -113,7 +116,7 @@ export function runExec(argv, { rootDir, now, exec } = {}) {
 // plain `node`. Use the same argv-identity idiom as hooks/scope-guard.mjs.
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
 if (isMain) {
-  const r = runExec(process.argv.slice(2), { rootDir: process.env.CLAUDE_PROJECT_DIR ?? process.cwd() })
+  const r = runExec(process.argv.slice(2), {})
   if (r.message) process.stderr.write(r.message + "\n")
   process.exit(r.code)
 }
