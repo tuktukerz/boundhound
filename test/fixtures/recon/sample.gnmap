@@ -1,0 +1,6 @@
+# Nmap 7.94 scan initiated Mon Aug 24 00:00:00 2026 as: nmap -sT -sV -Pn -T3 -oG - 1.2.3.4 5.6.7.8
+Host: 1.2.3.4 (api.acme.io)	Status: Up
+Host: 1.2.3.4 (api.acme.io)	Ports: 22/open/tcp//ssh///, 80/open/tcp//http///, 443/open/tcp//https///	Ignored State: closed (997)
+Host: 5.6.7.8 ()	Status: Up
+Host: 5.6.7.8 ()	Ports: 8080/open/tcp//http-proxy///	Ignored State: closed (999)
+# Nmap done at Mon Aug 24 00:00:01 2026 -- 2 IP addresses (2 hosts up) scanned in 1.23 seconds

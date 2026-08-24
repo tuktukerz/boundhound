@@ -1,0 +1,5 @@
+{"url":"https://api.acme.io","host":"1.2.3.4","status_code":200,"title":"Acme API","tech":["nginx","Ubuntu"]}
+{"url":"http://5.6.7.8:8080","host":"5.6.7.8","status_code":404}
+
+{not valid json at all}
+{"url":"https://www.acme.io","host":"1.2.3.5","status_code":200,"title":"Acme Home","tech":[]}
