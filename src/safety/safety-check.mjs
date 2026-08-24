@@ -14,6 +14,10 @@ const DOS = [
   { flag: "--rate", max: 10000 },
   { flag: "--min-rate", max: 5000 }, // nmap min packet rate
   { flag: "--max-rate", max: 5000 }, // nmap max packet rate
+  { flag: "-c", max: 50 },           // nuclei template concurrency
+  { flag: "-concurrency", max: 50 },
+  { flag: "-rl", max: 1000 },        // nuclei requests/sec
+  { flag: "-rate-limit", max: 1000 },
 ]
 
 export function checkSafety(tool, args, constraints) {

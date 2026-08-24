@@ -104,3 +104,49 @@ test("T3h: lowercase -t5 (glued, 5 threads) ALLOWs - -T5 deny is case-sensitive,
   expect(r.decision).toBe("ALLOW")
   expect(r.reason).toBe("safety-ok")
 })
+
+// Task 1 (Phase 2 enum, spec §2.2): nuclei-shaped DoS guards — concurrency
+// and rate-limit caps. Same spaced + =value handling as the existing DOS
+// array; no glued form needed for these (long-flag-only in practice).
+
+test("T1a: blocks nuclei -c above cap (spaced form)", () => {
+  const r = checkSafety("nuclei", ["-c", "100"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T1b: allows nuclei -c under cap", () => {
+  expect(checkSafety("nuclei", ["-c", "25"], strict).decision).toBe("ALLOW")
+})
+
+test("T1c: blocks nuclei -concurrency above cap (spaced form)", () => {
+  const r = checkSafety("nuclei", ["-concurrency", "100"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T1d: blocks nuclei -rl above cap (spaced form)", () => {
+  const r = checkSafety("nuclei", ["-rl", "5000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T1e: blocks nuclei -rl above cap (=value form)", () => {
+  const r = checkSafety("nuclei", ["-rl=5000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("T1f: allows nuclei -rl under cap", () => {
+  expect(checkSafety("nuclei", ["-rl", "150"], strict).decision).toBe("ALLOW")
+})
+
+test("T1g: existing -t 5000 still DENYs (regression, unrelated to nuclei caps)", () => {
+  expect(checkSafety("ffuf", ["-t", "5000"], strict).decision).toBe("DENY")
+})
+
+test("T1h: nuclei -t <template path> (non-numeric) is not denied by the -t numeric cap", () => {
+  const r = checkSafety("nuclei", ["-t", "/templates/x.yaml"], strict)
+  expect(r.decision).toBe("ALLOW")
+  expect(r.reason).toBe("safety-ok")
+})
