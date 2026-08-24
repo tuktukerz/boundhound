@@ -1,6 +1,6 @@
 // bin/omop-exec.test.mjs
 import { test, expect, beforeEach } from "bun:test"
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runExec } from "./omop-exec.mjs"
@@ -50,5 +50,17 @@ test("out-of-scope target -> DENY exit 2, no exec", () => {
 
 test("destructive arg -> DENY exit 2", () => {
   const r = runExec(["curl", "--target", "api.acme.io", "--", "--os-shell"], { rootDir: root, now, exec })
+  expect(r.code).toBe(2)
+})
+
+test("passes through tool non-zero exit code", () => {
+  const failExec = () => 7
+  const r = runExec(["curl", "--target", "api.acme.io", "--", "-I"], { rootDir: root, now, exec: failExec })
+  expect(r.code).toBe(7)
+})
+
+test("catalog error -> DENY exit 2 (no throw)", () => {
+  rmSync(join(root, "tools-catalog.json"))
+  const r = runExec(["curl", "--target", "api.acme.io", "--"], { rootDir: root, now, exec })
   expect(r.code).toBe(2)
 })
