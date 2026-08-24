@@ -3,8 +3,10 @@
 // Phase 0: minimal, generic rules. Enriched per-phase as new tools are added (spec §6).
 const DESTRUCTIVE = [/--dump-all/i, /--os-shell/i, /--os-pwn/i, /\brm\s+-rf\b/i, /--flush-session/i]
 // Literal token denies: no numeric cap, the token itself is the violation.
+// Case-sensitive by design: nmap timing templates are always uppercase (-T0..-T5).
+// Lowercase -t/-t5 is the unrelated threads flag, governed only by the DOS numeric cap below.
 const DOS_LITERAL = [
-  { pattern: /^-T5$/i, label: "-T5" }, // nmap insane timing template
+  { pattern: /^-T5$/, label: "-T5" }, // nmap insane timing template
 ]
 const DOS = [
   { flag: "-t", max: 500 },          // threads (ffuf/gobuster style)
@@ -29,7 +31,7 @@ export function checkSafety(tool, args, constraints) {
     for (let i = 0; i < args.length; i++) {
       const arg = args[i]
 
-      // Literal token denies (e.g., nmap -T5 insane timing), case-insensitive
+      // Literal token denies (e.g., nmap -T5 insane timing), case-sensitive
       for (const lit of DOS_LITERAL) {
         if (lit.pattern.test(arg)) {
           return { decision: "DENY", reason: `dos:${lit.label}` }

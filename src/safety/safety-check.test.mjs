@@ -82,3 +82,9 @@ test("T3f: allows -p (port spec) - not a DoS flag", () => {
 test("T3g: existing -t 5000 still DENYs (regression)", () => {
   expect(checkSafety("ffuf", ["-t", "5000"], strict).decision).toBe("DENY")
 })
+
+test("T3h: lowercase -t5 (glued, 5 threads) ALLOWs - -T5 deny is case-sensitive, not confused with threads flag", () => {
+  const r = checkSafety("ffuf", ["-t5"], strict)
+  expect(r.decision).toBe("ALLOW")
+  expect(r.reason).toBe("safety-ok")
+})
