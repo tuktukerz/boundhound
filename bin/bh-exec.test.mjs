@@ -1,5 +1,5 @@
 // bin/bh-exec.test.mjs
-import { test, expect, beforeEach } from "bun:test"
+import { test, expect, beforeEach, describe } from "bun:test"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -75,6 +75,97 @@ test("extraArgs cannot smuggle an alternate target past the declared flags", () 
 test("declared flags still work normally", () => {
   const r = runExec(["curl", "--target", "api.acme.io", "--", "-I"], { rootDir: root, now, exec })
   expect(r.code).toBe(0)
+})
+
+// Task 2: extraArgs value-flag walk (nmap-like entry: -sV boolean, -p and
+// -oG take_value with tight regex patterns). Same two patterns the real
+// catalog will use in a later task — kept here verbatim so they don't drift.
+// Scoped in its own describe() so this block's beforeEach (a different
+// catalog/tool than the file-level curl setup above) doesn't leak into the
+// pre-existing curl tests or the P3 split-dir tests below.
+describe("Task 2: extraArgs value-flag walk", () => {
+  const P_PATTERN = "^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$"
+  const OG_PATTERN = "^-$"
+
+  function setupNmapLike(scope) {
+    root = mkdtempSync(join(tmpdir(), "bh-exec-"))
+    mkdirSync(join(root, "engagements", "acme"), { recursive: true })
+    writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
+    writeFileSync(join(root, "engagements", ".active"), "acme")
+    writeFileSync(join(root, "tools-catalog.json"), JSON.stringify({
+      version: "0",
+      tools: [{
+        tools_name: "nmap", description: "d", category: "recon",
+        command: {
+          base: "nmap",
+          flags: [
+            { name: "-sV" },
+            { name: "-p", takes_value: true, value_pattern: P_PATTERN },
+            { name: "-oG", takes_value: true, value_pattern: OG_PATTERN },
+          ],
+          positional: [{ name: "target", required: true }],
+        },
+        phase: ["recon"],
+      }],
+    }))
+    calls = []
+  }
+
+  beforeEach(() => setupNmapLike(scope))
+
+  test("T2a: boolean + value flag with valid value -> ALLOW, value passed through", () => {
+    const r = runExec(["nmap", "--target", "api.acme.io", "--", "-sV", "-p", "22,80"], { rootDir: root, now, exec })
+    expect(r.code).toBe(0)
+    expect(calls.length).toBe(1)
+    expect(calls[0]).toEqual(["nmap", "-sV", "-p", "22,80", "api.acme.io"])
+  })
+
+  test("T2b: value flag with value failing pattern -> DENY exit 2, no exec", () => {
+    const r = runExec(["nmap", "--target", "api.acme.io", "--", "-p", "evil.com"], { rootDir: root, now, exec })
+    expect(r.code).toBe(2)
+    expect(calls.length).toBe(0)
+  })
+
+  test("T2c: value flag with no following token -> DENY exit 2, no exec", () => {
+    const r = runExec(["nmap", "--target", "api.acme.io", "--", "-p"], { rootDir: root, now, exec })
+    expect(r.code).toBe(2)
+    expect(calls.length).toBe(0)
+  })
+
+  test("T2d: undeclared token -> DENY exit 2, no exec", () => {
+    const r = runExec(["nmap", "--target", "api.acme.io", "--", "--undeclared"], { rootDir: root, now, exec })
+    expect(r.code).toBe(2)
+    expect(calls.length).toBe(0)
+  })
+
+  test("T2e: -oG - -> ALLOW (value matches ^-$)", () => {
+    const r = runExec(["nmap", "--target", "api.acme.io", "--", "-oG", "-"], { rootDir: root, now, exec })
+    expect(r.code).toBe(0)
+    expect(calls.length).toBe(1)
+    expect(calls[0]).toEqual(["nmap", "-oG", "-", "api.acme.io"])
+  })
+
+  test("T2f regression: curl boolean-only flags still ALLOW", () => {
+    root = mkdtempSync(join(tmpdir(), "bh-exec-"))
+    mkdirSync(join(root, "engagements", "acme"), { recursive: true })
+    writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
+    writeFileSync(join(root, "engagements", ".active"), "acme")
+    writeFileSync(join(root, "tools-catalog.json"), JSON.stringify({
+      version: "0", tools: [{ tools_name: "curl", description: "d", category: "utility",
+        command: { base: "curl", flags: [{ name: "-sS" }, { name: "-I" }], positional: [{ name: "url", required: true }] }, phase: ["utility"] }]
+    }))
+    calls = []
+    const r = runExec(["curl", "--target", "api.acme.io", "--", "-sS", "-I"], { rootDir: root, now, exec })
+    expect(r.code).toBe(0)
+    expect(calls.length).toBe(1)
+    expect(calls[0]).toEqual(["curl", "-sS", "-I", "api.acme.io"])
+  })
+
+  test("T2f regression: bare URL smuggled in extraArgs still DENYs (nmap-like catalog)", () => {
+    const r = runExec(["nmap", "--target", "api.acme.io", "--", "https://evil.com"], { rootDir: root, now, exec })
+    expect(r.code).toBe(2)
+    expect(calls.length).toBe(0)
+  })
 })
 
 // P3: split codeDir/dataDir must behave identically to the single-rootDir

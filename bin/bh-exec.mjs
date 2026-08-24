@@ -87,10 +87,26 @@ export function runExec(argv, { rootDir, codeDir, dataDir, now, exec } = {}) {
   // real destination ("target-smuggling"). Every token must be a flag the
   // catalog explicitly declares for this tool; a bare URL is never a
   // declared flag name, so this closes the hole.
-  const declaredFlags = new Set((entry.command.flags ?? []).map((f) => f.name))
-  for (const arg of extraArgs) {
-    if (!declaredFlags.has(arg)) {
-      return deny(`extraArgs contains undeclared token '${arg}' (not a declared flag for '${tool}')`)
+  //
+  // Value-carrying flags (takes_value: true) are the one controlled
+  // exception: the token immediately following such a flag is consumed as
+  // its value instead of being re-checked as a flag name — but only if it
+  // matches that flag's value_pattern. The catalog loader (catalog-loader.mjs)
+  // fail-closed-rejects any takes_value flag with no value_pattern, and every
+  // recon value_pattern is a tight char-class that cannot express a host, so
+  // a value slot can never be used to smuggle a target through.
+  const flagByName = new Map((entry.command.flags ?? []).map((f) => [f.name, f]))
+  for (let i = 0; i < extraArgs.length; i++) {
+    const tok = extraArgs[i]
+    const f = flagByName.get(tok)
+    if (!f) return deny(`extraArgs contains undeclared token '${tok}' (not a declared flag for '${tool}')`)
+    if (f.takes_value) {
+      const val = extraArgs[i + 1]
+      if (val === undefined) return deny(`flag '${tok}' expects a value but none given`)
+      if (!f.value_pattern || !new RegExp(f.value_pattern).test(val)) {
+        return deny(`value '${val}' for '${tok}' fails value_pattern`)
+      }
+      i++ // consume the validated value; it is NOT re-checked as a flag
     }
   }
 
