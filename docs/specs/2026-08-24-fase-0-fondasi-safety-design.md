@@ -52,7 +52,7 @@ Membangun **kerangka repo bergaya OmOP** + **lapisan keamanan yang benar-benar d
 ### 4.1 Struktur repo (gaya OmOP)
 
 ```
-omop-cc/
+boundhound/
 ├── .claude/
 │   ├── settings.json          # daftarkan hook PreToolUse
 │   ├── commands/              # /engagement, /mode  (format OmOP)

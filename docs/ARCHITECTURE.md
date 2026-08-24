@@ -1,4 +1,4 @@
-# OmOP-CC — Arsitektur & Roadmap
+# Boundhound — Arsitektur & Roadmap
 
 **Autonomous Pentest Agent di atas Claude Code.**
 Terinspirasi & memanen skill dari [`zakirkun/oh-my-open-pentest`](https://github.com/zakirkun/oh-my-open-pentest) (OmOP), tapi dibangun ulang sebagai native Claude Code — bukan plugin OpenCode.
@@ -58,7 +58,7 @@ Dua metrik yang tidak bisa ditawar: **(1)** output = report yang beneran kepakai
 | Scope | `scope.yaml` per engagement | Q9 |
 | Skill | Panen 250 → `skills-library/`, promosi per-fase + tuning | Q3, Q12=b |
 | Model | Campur per-fase (cepat buat recon/enum, Opus buat exploit/verify/report) | Q10=b |
-| Lokasi | Repo git baru `~/Documents/ian/omop-cc` | Q13 |
+| Lokasi | Repo git baru `~/Documents/ian/boundhound` | Q13 |
 | Urutan | **Fase 0 (safety) duluan**, wajib | Q14 |
 
 ---
@@ -85,7 +85,7 @@ Tiap fase = milestone berdiri sendiri dengan siklus **spec → plan → implemen
 ## 6. Struktur Repo (target akhir)
 
 ```
-omop-cc/
+boundhound/
 ├── .claude/
 │   ├── settings.json        # daftarkan hook PreToolUse (scope-guard)
 │   ├── commands/            # /engagement, /mode, ... (format OmOP)

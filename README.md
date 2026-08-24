@@ -1,4 +1,4 @@
-# OmOP-CC
+# Boundhound
 
 **Autonomous pentest agent, built natively on Claude Code.**
 
@@ -23,7 +23,7 @@
 
 ## Kenapa ini dibikin
 
-Pentest agent otonom itu berbahaya kalau nggak ada batas keras. Kebanyakan tool "AI pentest" mengandalkan agent untuk *patuh* pada scope — itu imbauan, bukan penegakan. OmOP-CC membalik itu: **agent secara teknis tidak bisa** menyentuh target di luar scope, karena penegakannya ada di lapisan yang agent tidak kontrol (git-tracked hook + choke-point CLI), bukan di prompt.
+Pentest agent otonom itu berbahaya kalau nggak ada batas keras. Kebanyakan tool "AI pentest" mengandalkan agent untuk *patuh* pada scope — itu imbauan, bukan penegakan. Boundhound membalik itu: **agent secara teknis tidak bisa** menyentuh target di luar scope, karena penegakannya ada di lapisan yang agent tidak kontrol (git-tracked hook + choke-point CLI), bukan di prompt.
 
 ## Cara kerja keamanannya
 

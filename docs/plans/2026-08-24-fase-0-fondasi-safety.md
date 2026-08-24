@@ -77,7 +77,7 @@ Expected: FAIL — belum ada `package.json`/deps (atau "cannot find module").
 ```json
 // package.json
 {
-  "name": "omop-cc",
+  "name": "boundhound",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -1333,7 +1333,7 @@ git commit -m "feat(engagement): scaffold engagement + scope template + set acti
 - Test: `docker/bridge-smoke.test.mjs` (integration; butuh Docker)
 
 **Interfaces:**
-- Produces: image `omop-cc:base`; `bin/omop-container up|down|status <name>`.
+- Produces: image `boundhound:base`; `bin/omop-container up|down|status <name>`.
 
 - [ ] **Step 1: Write the failing integration test**
 
@@ -1374,10 +1374,10 @@ set -euo pipefail
 action="${1:-}"; name="${2:-default}"; cname="omop-${name}"
 case "$action" in
   up)
-    docker image inspect omop-cc:base >/dev/null 2>&1 || \
-      docker build -t omop-cc:base "$(dirname "$0")/../docker"
+    docker image inspect boundhound:base >/dev/null 2>&1 || \
+      docker build -t boundhound:base "$(dirname "$0")/../docker"
     docker inspect "$cname" >/dev/null 2>&1 || \
-      docker run -d --name "$cname" omop-cc:base >/dev/null
+      docker run -d --name "$cname" boundhound:base >/dev/null
     echo "container up: $cname" ;;
   down) docker rm -f "$cname" >/dev/null 2>&1 || true; echo "down: $cname" ;;
   status) docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || echo "absent" ;;
