@@ -30,7 +30,6 @@ const FFUF_BOOLEAN_FLAGS = ["-s"]
 const NUCLEI_PATTERNS = {
   "-t": "^[A-Za-z0-9._/-]+$",
   "-severity": "^[a-z]+(,[a-z]+)*$",
-  "-tags": "^[a-z0-9,_-]+$",
   "-c": "^[0-9]+$",
   "-rl": "^[0-9]+$",
 }

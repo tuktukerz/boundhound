@@ -150,3 +150,47 @@ test("T1h: nuclei -t <template path> (non-numeric) is not denied by the -t numer
   expect(r.decision).toBe("ALLOW")
   expect(r.reason).toBe("safety-ok")
 })
+
+// Fix-wave FIX 1 (Critical): ffuf's real rate flag is single-dash "-rate",
+// not "--rate" -- the pre-existing DOS array only capped the double-dash
+// form, so "-rate <huge>" sailed through uncapped. Same spaced / =value
+// handling as every other DOS rule in the file.
+
+test("F1a: blocks ffuf -rate above cap (spaced form)", () => {
+  const r = checkSafety("ffuf", ["-rate", "5000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("F1b: blocks ffuf -rate above cap (=value form)", () => {
+  const r = checkSafety("ffuf", ["-rate=5000"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("F1c: allows ffuf -rate under cap", () => {
+  expect(checkSafety("ffuf", ["-rate", "500"], strict).decision).toBe("ALLOW")
+})
+
+// Boundary tests for the Phase-2 nuclei caps (-c max 50, -rl max 1000) --
+// cheap quality win, pins the exact off-by-one edges.
+
+test("F1d: nuclei -c at the cap (50) ALLOWs", () => {
+  expect(checkSafety("nuclei", ["-c", "50"], strict).decision).toBe("ALLOW")
+})
+
+test("F1e: nuclei -c one over the cap (51) DENYs", () => {
+  const r = checkSafety("nuclei", ["-c", "51"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("F1f: nuclei -rl at the cap (1000) ALLOWs", () => {
+  expect(checkSafety("nuclei", ["-rl", "1000"], strict).decision).toBe("ALLOW")
+})
+
+test("F1g: nuclei -rl one over the cap (1001) DENYs", () => {
+  const r = checkSafety("nuclei", ["-rl", "1001"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})

@@ -213,13 +213,6 @@
             "description": "severity filter"
           },
           {
-            "name": "-tags",
-            "type": "string",
-            "takes_value": true,
-            "value_pattern": "^[a-z0-9,_-]+$",
-            "description": "template tag filter"
-          },
-          {
             "name": "-c",
             "type": "string",
             "takes_value": true,

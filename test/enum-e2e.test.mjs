@@ -27,6 +27,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { parseFfufJson } from "../src/enum/enum-map.mjs"
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url))
 const bhExec = join(repoRoot, "bin", "bh-exec.mjs")
@@ -174,15 +175,15 @@ test.skipIf(!available)(
     //
     // ffuf's "-of json" only switches the *format* of the file writer; it
     // does not by itself redirect JSON to stdout -- verified by hand: with
-    // "-s" (silent) alone, real stdout carries only the bare matched
-    // keyword ("index.html"), never the JSON blob, regardless of -of. The
-    // JSON only materializes when "-o <path>" names a real output file, so
-    // that's what's used here ("-o" is already catalog-declared with an
-    // absolute-path value_pattern). The container-local path is retrieved
-    // with a plain `docker cp` after the audited run completes -- that's
-    // output retrieval, not a second tool invocation, so it doesn't need to
-    // go through bh-exec.
-    const ffufOutInContainer = "/tmp/ffuf-out.json"
+    // "-s" (silent) alone and no "-o", real stdout carries only the bare
+    // matched keyword ("index.html"), never the JSON blob, regardless of
+    // -of. The fix (this is the documented flow -- see pentest-enum/SKILL.md
+    // Step 1): "-o /dev/stdout" names a real output file that happens to be
+    // the process's own stdout, so ffuf's JSON writer fires and the blob
+    // lands on stdout for real. docker exec runs with stdio:"inherit" (see
+    // bin/bh-exec.mjs's dockerExec), so that stdout passes straight through
+    // to this spawnSync's own captured stdout -- same mechanism the nuclei
+    // run below already relies on, no docker cp needed.
     const ffufRun = spawnSync(
       "node",
       [
@@ -199,21 +200,31 @@ test.skipIf(!available)(
         "200",
         "-t",
         "20",
+        "-o",
+        "/dev/stdout",
         "-of",
         "json",
-        "-o",
-        ffufOutInContainer,
         "-s",
       ],
       { encoding: "utf8" },
     )
     expect(ffufRun.status).toBe(0)
 
+    // Written to disk exactly as the documented `>` redirect would capture
+    // it -- raw, undoctored stdout. ffuf still emits a bare per-match
+    // progress line on this same stdout ahead of the JSON blob even with
+    // `-s` (verified by hand), so the file is not always byte-for-byte pure
+    // JSON; that's real ffuf behavior, not a test artifact, so it's kept as
+    // stdout writes it rather than hand-cleaned here.
     const ffufOutPath = join(enumDir, `ffuf-${TARGET}.json`)
-    execFileSync("docker", ["cp", `${ENG_CONTAINER}:${ffufOutInContainer}`, ffufOutPath])
+    writeFileSync(ffufOutPath, ffufRun.stdout)
 
-    const ffufJson = JSON.parse(readFileSync(ffufOutPath, "utf8"))
-    const indexResult = ffufJson.results.find((r) => r.input?.FUZZ === "index.html")
+    // Read back through the real parser bh-enum-map itself uses --
+    // parseFfufJson recovers the JSON object from the first `{` it finds,
+    // tolerating exactly the leading noise described above (see its
+    // dedicated unit tests in src/enum/enum-map.test.mjs).
+    const ffufContent = parseFfufJson(readFileSync(ffufOutPath, "utf8"))
+    const indexResult = ffufContent.find((r) => r.path === "index.html")
     expect(indexResult).toBeTruthy()
     expect(indexResult.status).toBe(200)
 

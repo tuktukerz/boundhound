@@ -14,13 +14,28 @@
 // returns [] rather than throwing — same tolerance policy as recon-map's
 // parsers, since tool output is not a contract we control. A missing or
 // non-array `results` field is likewise treated as no results.
+//
+// Real-world wrinkle (pentest-enum/SKILL.md Step 1, `-o /dev/stdout -of
+// json -s`): ffuf writes one bare per-match progress line to stdout ahead
+// of the JSON blob whenever its `-o` output target happens to be stdout
+// itself — verified by hand against bh:base, true with or without `-s`.
+// A direct JSON.parse on that raw text throws (the leading line(s) aren't
+// JSON), so recover by re-parsing from the first `{` — none of ffuf's
+// bare match-progress lines contain a literal `{`, so that character
+// always marks the start of the real JSON object when one is present.
 export function parseFfufJson(text) {
   if (!text) return []
   let obj
   try {
     obj = JSON.parse(text)
   } catch {
-    return []
+    const start = text.indexOf("{")
+    if (start < 0) return []
+    try {
+      obj = JSON.parse(text.slice(start))
+    } catch {
+      return []
+    }
   }
   if (!obj || typeof obj !== "object" || !Array.isArray(obj.results)) return []
   return obj.results.map((r) => ({

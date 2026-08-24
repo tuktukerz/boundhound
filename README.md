@@ -64,7 +64,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 256 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 266 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -162,7 +162,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 256 pass / 1 skip
+bun test                        # 266 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml

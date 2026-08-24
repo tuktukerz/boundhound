@@ -87,7 +87,6 @@ COPY wordlists/common.txt /usr/share/boundhound/wordlists/common.txt
 - **nuclei** — base `nuclei`, `target_flag:"-u"`, `phase:["enum"]`, `requires_root:false`. flags:
   - `-t` (takes_value, `^[A-Za-z0-9._/-]+$` — template path/dir)
   - `-severity` / `-s`? use `-severity` (takes_value, `^[a-z]+(,[a-z]+)*$`)
-  - `-tags` (takes_value, `^[a-z0-9,_-]+$`)
   - `-c` (takes_value, `^[0-9]+$` — concurrency; safety-capped 50)
   - `-rl` (takes_value, `^[0-9]+$` — rate-limit; safety-capped 1000)
   - `-jsonl` (boolean), `-disable-update-check` (boolean), `-silent` (boolean), `-nc`? keep minimal.
@@ -101,7 +100,7 @@ Only flags the skill actually orchestrates are declared. Every value flag is anc
 
 Per the locked skill strategy (**author our own**): a Claude Code skill authored for Boundhound, no external references. `.claude/skills/pentest-enum/SKILL.md` orchestrates, all via `bh-exec`, consuming the prior phase's `recon-map.json`:
 1. Require an active engagement + an existing `recon-map.json` (the live HTTP services / hosts to enumerate). If absent, tell the operator to run `/recon` first.
-2. **ffuf** content discovery on each in-scope live HTTP service: `bh-exec ffuf --target http://<host>/FUZZ -- -w /usr/share/boundhound/wordlists/common.txt -mc 200,204,301,302,307,401,403 -t 40 -of json -s` → `output/enum/ffuf-<host>.json`. Recommend modest threads; note the safety cap.
+2. **ffuf** content discovery on each in-scope live HTTP service: `bh-exec ffuf --target http://<host>/FUZZ -- -w /usr/share/boundhound/wordlists/common.txt -mc 200,204,301,302,307,401,403 -t 40 -o /dev/stdout -of json -s` → `output/enum/ffuf-<host>.json`. Recommend modest threads; note the safety cap. **Fix-wave update:** `-of json` alone never puts JSON on stdout (ffuf's JSON writer only fires when a real `-o` output target is given); `-o /dev/stdout` supplies that target while still landing the bytes on the process's own stdout for the shell redirect to capture. `parseFfufJson` tolerates the bare per-match progress line(s) ffuf still emits on that same stdout ahead of the JSON blob.
 3. **nuclei** detection on each in-scope live host: `bh-exec nuclei --target http://<host> -- -jsonl -severity info,low,medium,high,critical -c 25 -rl 150 -disable-update-check` → `output/enum/nuclei-<host>.jsonl`. Document the online-templates vs bundled-template distinction.
 4. **bh-enum-map** → `output/enum/enum-map.json`.
 Every target still passes scope (bh-exec re-checks). `.claude/commands/enum.md` (`/enum`) loads + follows the skill. Output under `engagements/<name>/output/enum/`.
@@ -118,6 +117,8 @@ Every target still passes scope (bh-exec re-checks). `.claude/commands/enum.md` 
 | Direct Bash bypass | ffuf/nuclei already in `guard.mjs` NETWORK_BINS → denied |
 
 All tools run only inside `docker exec bh-<engagement>`.
+
+**Accepted residual risk — nuclei template content bypasses the `--target` scope check.** `safety-check` and `bh-exec`'s scope re-check both operate on the command line (the `-u`/`--target` value and the declared flags) — nothing inspects the *content* of a `-t` template file, and nuclei templates can hardcode an absolute URL to a host unrelated to `--target` instead of using the `{{BaseURL}}`/`{{Hostname}}` placeholders well-behaved templates use. A template like that would have nuclei itself issue an out-of-scope request that the upstream scope check never sees. The catalog deliberately does not constrain `-t`'s `value_pattern` to a fixed allowlist of template paths, since doing so would defeat nuclei's actual value (detection breadth across its community template set); the accepted mitigation is operational — only run vetted/trusted templates — with a hard mitigation (container network egress-lock, restricting the engagement container's reachable hosts to the in-scope set regardless of template content) deferred to a later phase.
 
 ---
 
@@ -136,6 +137,7 @@ All tools run only inside `docker exec bh-<engagement>`.
 ---
 
 ## 8. English hygiene / Deferred
+- **Fix-wave update:** the nuclei catalog entry's `-tags` flag (§4 originally listed it) was removed post-review — its `^[a-z0-9,_-]+$` value_pattern let a caller select `dos`/`intrusive`/`fuzz` template categories by name, unenforced by anything else in the safety layer. The skill only ever used `-severity`, never `-tags`, so nothing built on top of this catalog broke.
 - Deferred tools (gobuster/feroxbuster/whatweb/dnsx/wpscan/nikto) — later phases.
 - Full online nuclei template set — operator-run in real engagements; e2e uses a bundled template for determinism.
 - `rate_limit` scope field still parsed-only.
