@@ -30,15 +30,24 @@ const bhExec = join(repoRoot, "bin", "bh-exec.mjs")
 const bhReconMap = join(repoRoot, "bin", "bh-recon-map.mjs")
 const dockerDir = join(repoRoot, "docker")
 
-// Fixed test id (not random) so a crashed prior run leaves predictably-named
-// leftovers that the next run's preemptive cleanup (in beforeAll) can find
-// and remove -- see spec/task-8 brief step 7 ("use unique names... to avoid
-// collisions", "don't let a mid-test failure leak containers").
-const TEST_ID = "e2erecon"
-const NET = `bh-${TEST_ID}-net`
-const TARGET = `bh-${TEST_ID}-target`
-const ENG_NAME = TEST_ID
-const ENG_CONTAINER = `bh-${ENG_NAME}`
+// Fixed prefix + this process's pid: unique per run (so two runs sharing a
+// docker daemon never collide on `docker run --name` / `docker network
+// create`), while the prefix stays predictable enough that a crashed prior
+// run's leftovers (a different pid, but the same "bh-e2erecon" prefix) are
+// still found and removed by the preemptive sweep in beforeAll -- see
+// spec/task-8 brief step 7 ("use unique names... to avoid collisions",
+// "don't let a mid-test failure leak containers"). This suite assumes it is
+// the only in-flight "bh-e2erecon*" run against this docker daemon at a
+// time -- the prefix sweep below is a crash-recovery mechanism, not a lock,
+// so it is not safe against a genuinely concurrent bh-e2erecon run on a
+// shared daemon; fine for local dev and per-job-isolated CI, where each test
+// run owns the daemon (or its own pid namespace) exclusively.
+const PREFIX = "bh-e2erecon"
+const RUN_ID = `${PREFIX}-${process.pid}` // e.g. "bh-e2erecon-12345"
+const NET = `${RUN_ID}-net`
+const TARGET = `${RUN_ID}-target`
+const ENG_CONTAINER = RUN_ID // docker container name, must be "bh-<engagement-name>"
+const ENG_NAME = ENG_CONTAINER.slice(3) // engagement name bh-exec.mjs resolves back into "bh-<name>"
 // Docker's embedded DNS resolves every container on a user-defined bridge
 // network as both "<name>" and "<name>.<network>". httpx (a Go binary using
 // its own DNS resolution path, not glibc) only resolves the dotted form
@@ -64,6 +73,22 @@ function rmContainer(name) {
 }
 function rmNetwork(name) {
   spawnSync("docker", ["network", "rm", name], { stdio: "ignore" })
+}
+
+// Prefix sweep (not exact-name lookup): a crashed prior run used a different
+// pid, so its leftover container/network names don't match this run's exact
+// RUN_ID/NET/TARGET -- but they do share the "bh-e2erecon" prefix. Best
+// effort: an empty `-q` list is a no-op `rm -f`/`network rm` with no args,
+// which docker itself rejects harmlessly (stdio ignored either way).
+function sweepContainersByPrefix(prefix) {
+  const r = spawnSync("docker", ["ps", "-aq", "--filter", `name=${prefix}`], { encoding: "utf8" })
+  const ids = r.stdout.trim().split("\n").filter(Boolean)
+  for (const id of ids) spawnSync("docker", ["rm", "-f", id], { stdio: "ignore" })
+}
+function sweepNetworksByPrefix(prefix) {
+  const r = spawnSync("docker", ["network", "ls", "-q", "--filter", `name=${prefix}`], { encoding: "utf8" })
+  const ids = r.stdout.trim().split("\n").filter(Boolean)
+  for (const id of ids) spawnSync("docker", ["network", "rm", id], { stdio: "ignore" })
 }
 
 // Ensure an image exists locally; only pull/build it if truly absent. For
@@ -96,10 +121,11 @@ beforeAll(() => {
   if (!available) return
 
   // Preemptive cleanup in case a prior run crashed mid-test and leaked
-  // containers/network under these fixed names.
-  rmContainer(ENG_CONTAINER)
-  rmContainer(TARGET)
-  rmNetwork(NET)
+  // containers/network. Swept by PREFIX (not this run's own exact names):
+  // a crashed run had a different pid, so only the shared "bh-e2erecon"
+  // prefix -- not RUN_ID/NET/TARGET -- can find its leftovers.
+  sweepContainersByPrefix(PREFIX)
+  sweepNetworksByPrefix(PREFIX)
 
   dataDir = mkdtempSync(join(tmpdir(), "boundhound-recon-e2e-"))
   mkdirSync(join(dataDir, "engagements", ENG_NAME, "output", "recon"), { recursive: true })
@@ -194,6 +220,12 @@ test.skipIf(!available)(
   30000,
 )
 
+// Asserting "the audit log's LAST line is our DENY" relies on this test
+// running after the main pipeline test above in file order (bun runs tests
+// within one file sequentially, in declaration order) -- the pipeline test
+// appends its own ALLOW entries first, then this test appends the one DENY
+// entry checked below, so it is genuinely the last line by the time this
+// runs.
 test.skipIf(!available)("recon e2e (requires docker): out-of-scope target is DENYed (exit 2) and audited", () => {
   const auditPath = join(dataDir, "engagements", ENG_NAME, "audit.log")
 
