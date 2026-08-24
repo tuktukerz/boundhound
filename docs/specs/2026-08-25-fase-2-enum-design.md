@@ -39,7 +39,8 @@ Enumerate the recon-discovered surface: brute-force web content with **ffuf**, a
 ffuf and nuclei both take their target behind `-u`, so they use the existing `command.target_flag: "-u"`. ffuf's target is a **FUZZ-URL** (`http://<host>/FUZZ`); `normalizeTarget` already extracts the host from a URL (verified: `https://acme.io/FUZZ` → `acme.io`), so scope-checking is unchanged. Their value flags (`-w`, `-mc`, `-t`, `-c`, `-rl`, `-severity`, …) ride the Phase-1 `takes_value`+`value_pattern` allowlist. **No change to `command-builder.mjs` or `bh-exec.mjs`.**
 
 ### 2.2 `safety-check` — nuclei volume caps (additive)
-The existing DoS rules cap `-t`/`--threads` (500), `--rate` (10000), `--min-rate`/`--max-rate` (5000). ffuf's `-t`/`-rate` are already covered. Add nuclei-shaped caps when `block_dos` is true:
+The existing DoS rules cap `-t`/`--threads` (500), `--min-rate`/`--max-rate` (5000). ffuf's `-t` is covered by the threads cap; ffuf's real rate flag is single-dash `-rate`, which the pre-existing double-dash `--rate` rule does NOT match — so a dedicated `-rate` cap is added this phase. Add these caps when `block_dos` is true:
+- `-rate` → max **1000** (ffuf requests/sec — single-dash; the old `--rate` rule never matched it).
 - `-c` / `-concurrency` → max **50** (nuclei template concurrency).
 - `-rl` / `-rate-limit` → max **1000** (nuclei requests/sec).
 Same spaced / `=value` / (no glued needed for long flags) handling already in the file. Keep all existing rules. This is where the safety layer earns its keep — enum tools are high-volume by nature.
@@ -111,7 +112,7 @@ Every target still passes scope (bh-exec re-checks). `.claude/commands/enum.md` 
 
 | Capability | Bound |
 |---|---|
-| Web brute force (ffuf) | scope-checked host; `-t` threads capped (≤500) + `-rate` capped (≤10000) by safety-check; wordlist required |
+| Web brute force (ffuf) | scope-checked host; `-t` threads capped (≤500) + `-rate` req/s capped (≤1000) by safety-check; wordlist required |
 | Vuln scanning (nuclei) | scope-checked host; `-c` concurrency capped (≤50) + `-rl` rate capped (≤1000); detection-only, intrusive/DoS template categories not orchestrated by the skill |
 | Value flags (`-w`,`-t`,`-mc`,…) | fully-anchored `value_pattern`s; loader rejects unanchored; a path/number value can't express a network host (target only via `-u`, scope-checked) |
 | Direct Bash bypass | ffuf/nuclei already in `guard.mjs` NETWORK_BINS → denied |
