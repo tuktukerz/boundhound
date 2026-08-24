@@ -194,3 +194,89 @@ test("F1g: nuclei -rl one over the cap (1001) DENYs", () => {
   expect(r.decision).toBe("DENY")
   expect(r.reason).toMatch(/dos:/i)
 })
+
+// Task 1 (Phase 3 exploit, spec §2.2): sqlmap weaponizing-flag denials +
+// --level/--risk caps. THE safety centerpiece for the exploit phase.
+// block_destructive must deny every flag that would turn a proof-of-vuln
+// SQLi confirmation into data exfiltration, RCE, file/registry access,
+// privilege escalation, or arbitrary code execution.
+
+const WEAPONIZING_FLAGS = [
+  "--dump", "--dump-all", "--os-shell", "--os-pwn", "--os-cmd",
+  "--sql-shell", "--sql-query", "--file-read", "--file-write", "--file-dest",
+  "--reg-read", "--reg-add", "--reg-del", "--priv-esc", "--msf-path",
+  "--os-smbrelay", "--eval", "--os-bof",
+]
+
+for (const flag of WEAPONIZING_FLAGS) {
+  test(`X1: sqlmap ${flag} is DENIED (destructive)`, () => {
+    const r = checkSafety("sqlmap", ["-u", "http://x/?id=1", flag], strict)
+    expect(r.decision).toBe("DENY")
+    expect(r.reason).toMatch(/destructive/i)
+  })
+}
+
+test("X1: sqlmap --dump=1 (=value form) is DENIED", () => {
+  const r = checkSafety("sqlmap", ["-u", "http://x/?id=1", "--dump=1"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/destructive/i)
+})
+
+const BENIGN_PROOF_FLAGS = ["--batch", "--dbs", "--current-db", "--banner", "--is-dba", "--current-user"]
+
+for (const flag of BENIGN_PROOF_FLAGS) {
+  test(`X1: sqlmap ${flag} is ALLOWED (non-destructive proof flag)`, () => {
+    const r = checkSafety("sqlmap", ["-u", "http://x/?id=1", flag], strict)
+    expect(r.decision).toBe("ALLOW")
+  })
+}
+
+test("X1: sqlmap --dbms mysql is ALLOWED - not mistaken for --dump", () => {
+  const r = checkSafety("sqlmap", ["-u", "http://x/?id=1", "--dbms", "mysql"], strict)
+  expect(r.decision).toBe("ALLOW")
+})
+
+test("X1: sqlmap --dbs is ALLOWED - not mistaken for --dump (substring guard)", () => {
+  const r = checkSafety("sqlmap", ["-u", "http://x/?id=1", "--dbs"], strict)
+  expect(r.decision).toBe("ALLOW")
+})
+
+test("X2: sqlmap --level 5 is DENIED (spaced form, above cap)", () => {
+  const r = checkSafety("sqlmap", ["--level", "5"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("X2: sqlmap --level=5 is DENIED (=value form, above cap)", () => {
+  const r = checkSafety("sqlmap", ["--level=5"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("X2: sqlmap --level 3 is ALLOWED (at cap)", () => {
+  expect(checkSafety("sqlmap", ["--level", "3"], strict).decision).toBe("ALLOW")
+})
+
+test("X2: sqlmap --risk 3 is DENIED (spaced form, above cap)", () => {
+  const r = checkSafety("sqlmap", ["--risk", "3"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("X2: sqlmap --risk=3 is DENIED (=value form, above cap)", () => {
+  const r = checkSafety("sqlmap", ["--risk=3"], strict)
+  expect(r.decision).toBe("DENY")
+  expect(r.reason).toMatch(/dos:/i)
+})
+
+test("X2: sqlmap --risk 2 is ALLOWED (at cap)", () => {
+  expect(checkSafety("sqlmap", ["--risk", "2"], strict).decision).toBe("ALLOW")
+})
+
+test("X2: existing --threads cap still enforced (regression, not weakened by new flags)", () => {
+  expect(checkSafety("sqlmap", ["--threads", "5000"], strict).decision).toBe("DENY")
+})
+
+test("X2: existing --dump-all destructive rule still enforced (regression, not weakened)", () => {
+  expect(checkSafety("sqlmap", ["--dump-all"], strict).decision).toBe("DENY")
+})
