@@ -21,11 +21,17 @@ if (isMain) {
   let input = ""
   process.stdin.setEncoding("utf8")
   for await (const chunk of process.stdin) input += chunk
-  let event = {}
-  try { event = JSON.parse(input || "{}") } catch { event = {} }
-  const out = event.tool_name
-    ? decideFromEvent(event)
-    : { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "unparseable hook event (fail-closed)" } }
+  const failClosed = (reason) => ({
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
+  })
+  let out
+  try {
+    const parsed = JSON.parse(input || "{}")
+    const event = parsed && typeof parsed === "object" ? parsed : {}
+    out = event.tool_name ? decideFromEvent(event) : failClosed("malformed hook event (fail-closed)")
+  } catch {
+    out = failClosed("hook error (fail-closed)")
+  }
   process.stdout.write(JSON.stringify(out))
   // Hardening: exit 2 on deny so the block holds even if the JSON schema drifts.
   process.exit(out.hookSpecificOutput.permissionDecision === "deny" ? 2 : 0)
