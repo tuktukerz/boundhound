@@ -1,0 +1,12 @@
+{
+  "name": "omop-cc",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  }
+}

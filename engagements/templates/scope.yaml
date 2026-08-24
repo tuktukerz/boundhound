@@ -1,0 +1,15 @@
+engagement: REPLACE_ME
+authorization: "REPLACE_ME — bukti izin (H1/Bugcrowd/kontrak/lab)"
+mode: bug-bounty
+scope_enforcement: strict
+in_scope:
+  domains: []
+  cidrs: []
+out_of_scope:
+  domains: []
+  cidrs: []
+safety_constraints:
+  block_destructive: true
+  block_dos: true
+rate_limit: 10
+notes: ""
