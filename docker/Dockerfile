@@ -10,7 +10,7 @@ RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.6 \
 FROM debian:stable-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl iputils-ping dnsutils ca-certificates nmap \
+      curl iputils-ping dnsutils ca-certificates nmap sqlmap \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=gotools /go/bin/subfinder /usr/local/bin/subfinder
 COPY --from=gotools /go/bin/httpx    /usr/local/bin/httpx
@@ -19,5 +19,8 @@ COPY --from=gotools /go/bin/nuclei   /usr/local/bin/nuclei
 # Bundled small wordlist for ffuf content discovery (no built-in generator).
 COPY wordlists/common.txt /usr/share/boundhound/wordlists/common.txt
 # Phase 1: recon tools (subfinder/httpx/nmap). Phase 2: enum tools (ffuf/nuclei).
+# Phase 3: exploit tool (sqlmap, apt-installed above) — bounded proof-of-vulnerability
+# SQL-injection confirmation only; weaponizing flags are denied by safety-check + the
+# tools-catalog allowlist, not by anything in this image.
 WORKDIR /work
 CMD ["sleep", "infinity"]
