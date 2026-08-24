@@ -12,8 +12,13 @@ const DOS = [
   { flag: "-t", max: 500 },          // threads (ffuf/gobuster style)
   { flag: "--threads", max: 500 },
   { flag: "--rate", max: 10000 },
+  { flag: "-rate", max: 1000 },      // ffuf's real rate flag is single-dash; --rate above is a distinct (looser) cap some tools use
   { flag: "--min-rate", max: 5000 }, // nmap min packet rate
   { flag: "--max-rate", max: 5000 }, // nmap max packet rate
+  { flag: "-c", max: 50 },           // nuclei template concurrency
+  { flag: "-concurrency", max: 50 },
+  { flag: "-rl", max: 1000 },        // nuclei requests/sec
+  { flag: "-rate-limit", max: 1000 },
 ]
 
 export function checkSafety(tool, args, constraints) {

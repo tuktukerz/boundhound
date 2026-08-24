@@ -1,7 +1,7 @@
 {
   "$schema": "./docs/tools-catalog.schema.json",
   "version": "0.0.0",
-  "categories": ["utility", "recon"],
+  "categories": ["utility", "recon", "enum"],
   "tools": [
     {
       "tools_name": "curl",
@@ -116,6 +116,137 @@
       "tags": ["port-scan", "service-detection"],
       "requires_root": false,
       "output_format": ["grepable"]
+    },
+    {
+      "tools_name": "ffuf",
+      "description": "Web content/directory discovery via wordlist fuzzing",
+      "category": "enum",
+      "command": {
+        "base": "ffuf",
+        "target_flag": "-u",
+        "flags": [
+          {
+            "name": "-w",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^/[A-Za-z0-9._/-]+$",
+            "description": "wordlist absolute path"
+          },
+          {
+            "name": "-mc",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]{3}(,[0-9]{3})*$",
+            "description": "match HTTP status codes"
+          },
+          {
+            "name": "-fc",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]{3}(,[0-9]{3})*$",
+            "description": "filter HTTP status codes"
+          },
+          {
+            "name": "-t",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+$",
+            "description": "threads (also safety-capped)"
+          },
+          {
+            "name": "-rate",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+$",
+            "description": "requests per second (also safety-capped)"
+          },
+          {
+            "name": "-of",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^(json|csv|md|html|ejson)$",
+            "description": "output format"
+          },
+          {
+            "name": "-o",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^/[A-Za-z0-9._/-]+$",
+            "description": "output file absolute path"
+          },
+          { "name": "-s", "type": "boolean", "description": "silent mode" }
+        ]
+      },
+      "installation": {
+        "linux": {
+          "command": "go install github.com/ffuf/ffuf/v2@v2.1.0",
+          "manager": "go"
+        }
+      },
+      "check_installed": { "command": "ffuf -V", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["enum"],
+      "tags": ["content-discovery", "fuzzing", "brute-force"],
+      "requires_root": false,
+      "output_format": ["json"]
+    },
+    {
+      "tools_name": "nuclei",
+      "description": "Templated detection of known vulnerabilities, misconfigurations, and tech",
+      "category": "enum",
+      "command": {
+        "base": "nuclei",
+        "target_flag": "-u",
+        "flags": [
+          {
+            "name": "-t",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[A-Za-z0-9._/-]+$",
+            "description": "template path/dir"
+          },
+          {
+            "name": "-severity",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[a-z]+(,[a-z]+)*$",
+            "description": "severity filter"
+          },
+          {
+            "name": "-c",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+$",
+            "description": "template concurrency (also safety-capped)"
+          },
+          {
+            "name": "-rl",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+$",
+            "description": "rate-limit requests per second (also safety-capped)"
+          },
+          { "name": "-jsonl", "type": "boolean", "description": "JSON lines output" },
+          { "name": "-silent", "type": "boolean", "description": "silent output" },
+          {
+            "name": "-disable-update-check",
+            "type": "boolean",
+            "description": "skip template/engine update check (offline-safe)"
+          }
+        ]
+      },
+      "installation": {
+        "linux": {
+          "command": "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.3.0",
+          "manager": "go"
+        }
+      },
+      "check_installed": { "command": "nuclei -version", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["enum"],
+      "tags": ["vuln-scan", "detection", "tech-detect"],
+      "requires_root": false,
+      "output_format": ["jsonl"]
     }
   ]
 }

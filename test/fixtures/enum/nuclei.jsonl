@@ -1,0 +1,4 @@
+{"template-id":"tech-detect-nginx","template-path":"http/technologies/nginx-detect.yaml","info":{"name":"Nginx Detect","author":["boundhound"],"tags":["tech"],"severity":"info"},"type":"http","host":"http://acme.io","matched-at":"http://acme.io/","ip":"1.2.3.4","timestamp":"2026-08-24T00:00:00Z"}
+
+{not valid json at all}
+{"template-id":"exposed-panel-admin","template-path":"http/exposures/admin-panel.yaml","info":{"name":"Exposed Admin Panel","author":["boundhound"],"tags":["panel","exposure"],"severity":"high"},"type":"http","host":"http://acme.io","matched-at":"http://acme.io/admin","ip":"1.2.3.4","timestamp":"2026-08-24T00:00:05Z"}

@@ -1,0 +1,40 @@
+{
+  "commandline": "ffuf -w /usr/share/boundhound/wordlists/common.txt -u http://acme.io/FUZZ -mc 200,301,403 -of json",
+  "time": "2026-08-24T00:00:00Z",
+  "results": [
+    {
+      "input": { "FUZZ": "admin" },
+      "position": 1,
+      "status": 200,
+      "length": 1234,
+      "words": 42,
+      "lines": 30,
+      "content-type": "text/html; charset=UTF-8",
+      "redirectlocation": "",
+      "scraper": {},
+      "duration": 415218666,
+      "resultfile": "",
+      "url": "http://acme.io/admin",
+      "host": "acme.io"
+    },
+    {
+      "input": { "FUZZ": "backup" },
+      "position": 2,
+      "status": 301,
+      "length": 0,
+      "words": 1,
+      "lines": 1,
+      "content-type": "",
+      "redirectlocation": "http://acme.io/backup/",
+      "scraper": {},
+      "duration": 220112233,
+      "resultfile": "",
+      "url": "http://acme.io/backup",
+      "host": "acme.io"
+    }
+  ],
+  "config": {
+    "wordlist": ["/usr/share/boundhound/wordlists/common.txt:FUZZ"],
+    "url": "http://acme.io/FUZZ"
+  }
+}
