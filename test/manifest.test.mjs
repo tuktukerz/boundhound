@@ -44,10 +44,12 @@ test("hooks/hooks.json PreToolUse command references ${CLAUDE_PLUGIN_ROOT}", () 
   expect(commands.some((cmd) => cmd.includes("${CLAUDE_PLUGIN_ROOT}"))).toBe(true)
 })
 
-test("hooks/hooks.json PreToolUse matcher includes WebFetch", () => {
+test("hooks/hooks.json PreToolUse matcher is the exact full Phase-0 tool set", () => {
   const hooks = readJson("hooks/hooks.json")
   const matchers = hooks.hooks.PreToolUse.map((entry) => entry.matcher)
-  expect(matchers.some((m) => m.includes("WebFetch"))).toBe(true)
+  // Exact-match (not .includes) so a future narrowing of the matcher — e.g.
+  // dropping to just "WebFetch" — fails loudly instead of passing silently.
+  expect(matchers.some((m) => m === "Bash|WebFetch|WebSearch|Write|Edit")).toBe(true)
 })
 
 test("marketplace.json parses as valid JSON", () => {
