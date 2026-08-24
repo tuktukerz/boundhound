@@ -4,13 +4,13 @@
 
 ---
 
-## 🚧 Status: Phase 1 — Recon
+## 🚧 Status: Phase 2 — Enumeration
 
 ```
 [0] Foundation & Safety   ██████████ done
 [0.5] Plugin packaging    ██████████ done
-[1] Recon                 ██████████ done   <- you are here
-[2] Enumeration           ░░░░░░░░░░ not started
+[1] Recon                 ██████████ done
+[2] Enumeration           ██████████ done   <- you are here
 [3] Exploitation          ░░░░░░░░░░ not started
 [4] Verification          ░░░░░░░░░░ not started
 [5] Reporting             ░░░░░░░░░░ not started
@@ -22,7 +22,9 @@
 
 **Phase 0.5 made that same safety layer installable as a plugin**, so it runs from any project directory instead of only from inside this repo checkout. It changed nothing about the enforcement logic — only *where* it reads code from and writes state to.
 
-**Phase 1 adds the first real attack-surface-mapping capability: recon** — subfinder, httpx, and nmap, all still running through the same `bh-exec` choke point proven in Phase 0. See **Recon** below.
+**Phase 1 added the first real attack-surface-mapping capability: recon** — subfinder, httpx, and nmap, all running through the same `bh-exec` choke point proven in Phase 0. See **Recon** below.
+
+**Phase 2 adds enumeration: ffuf and nuclei**, deepening what recon found — still through the same `bh-exec` choke point, with no shortcuts. See **Enumeration** below.
 
 ## Why this exists
 
@@ -62,7 +64,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 181 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 256 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -100,6 +102,42 @@ actual local target container and runs the real `nmap`/`httpx` binaries
 against it through `bh-exec`, driving the actual CLIs exactly as an
 operator would.
 
+## Enumeration
+
+Phase 2 deepens what recon already found, orchestrated by the
+self-authored `pentest-enum` skill (run via `/enum`):
+
+1. **`ffuf`** — web content discovery (wordlist-driven directory/file
+   fuzzing) against every live HTTP service `httpx` found in recon.
+2. **`nuclei`** — templated detection of known vulnerabilities,
+   misconfigurations, and technologies against the same hosts.
+
+Both go through `bh-exec` exactly like every other tool in this system —
+scope-checked, safety-capped, audited, and run inside the engagement's
+container. Enum never gets a shortcut around the choke point proven in
+Phase 0, and it never invents its own target list: it consumes the
+`recon-map.json` recon already wrote (re-screening each host against the
+engagement's *current* scope before touching it), and refuses to run at
+all if that file doesn't exist yet.
+
+A final step, `bh-enum-map` (`bin/bh-enum-map.mjs`), reads the raw
+`ffuf`/`nuclei` output already on disk and normalizes it into one
+`enum-map.json`, written to
+`engagements/<name>/output/enum/enum-map.json`.
+
+**The DoS caps are load-bearing here, not decorative.** ffuf and nuclei
+are both high-volume by design — a wordlist fuzz run or a template scan
+can fire hundreds of requests per second — so `safety-check` enforces caps
+on ffuf's thread count and nuclei's template concurrency and request rate,
+independently of whatever flags a skill or operator asks for. This is
+where those caps actually matter, unlike the lighter-weight Phase 1 tools.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/enum-e2e.test.mjs`](test/enum-e2e.test.mjs) — which spins up an
+actual local target container and runs the real `ffuf`/`nuclei` binaries
+against it through `bh-exec`, exactly as `recon-e2e.test.mjs` does for
+Phase 1.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -124,7 +162,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 181 pass / 1 skip
+bun test                        # 256 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -142,12 +180,14 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
 .claude/
   skills/pentest-mode/     active skill (engagement mode + scope selector)
   skills/pentest-recon/    active skill (Phase 1 recon orchestrator: subfinder -> httpx -> nmap -> bh-recon-map)
-  commands/                /engagement, /mode, /recon
+  skills/pentest-enum/     active skill (Phase 2 enum orchestrator: ffuf -> nuclei -> bh-enum-map)
+  commands/                /engagement, /mode, /recon, /enum
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
   bh-engagement.mjs      scaffold a new engagement
   bh-recon-map.mjs       merges subfinder/httpx/nmap output into recon-map.json
+  bh-enum-map.mjs        merges ffuf/nuclei output into enum-map.json
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -155,12 +195,15 @@ hooks/
 src/
   paths.mjs                code root vs data root resolution (plugin vs local-project)
   scope/                   parser + matcher (deny-by-default) + fail-closed resolver
-  safety/                  blocks destructive/DoS actions
+  safety/                  blocks destructive/DoS actions (incl. ffuf/nuclei concurrency & rate caps)
   catalog/                 tools-catalog.json loader (ToolEntry schema)
   guard/                   command classification, anti-bypass
   audit/                   JSONL audit log
   recon/                   recon-map.mjs: normalizes subfinder/httpx/nmap output into recon-map.json
-docker/Dockerfile          multi-stage image — nmap + subfinder + httpx (Phase 1 recon tools)
+  enum/                    enum-map.mjs: normalizes ffuf/nuclei output into enum-map.json
+docker/
+  Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2)
+  wordlists/               bundled wordlist for ffuf content discovery
 skills-library/            authored skill library (promoted to active per phase)
 docs/
   ARCHITECTURE.md          big-picture map & 8 phases
