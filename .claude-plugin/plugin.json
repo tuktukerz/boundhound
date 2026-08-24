@@ -1,6 +1,6 @@
 {
   "name": "boundhound",
-  "description": "Autonomous pentest agent with enforced, deny-by-default scope safety. Phase 3: recon + enumeration + bounded exploitation.",
+  "description": "Autonomous pentest agent with enforced, deny-by-default scope safety. Phase 4: recon + enumeration + bounded exploitation + verified findings.",
   "version": "0.1.0",
   "author": { "name": "tuktukerz" },
   "skills": "./.claude/skills/",
