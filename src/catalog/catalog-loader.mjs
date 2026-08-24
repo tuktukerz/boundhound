@@ -15,6 +15,22 @@ function validateEntry(e) {
         `tool '${e.tools_name}' flag '${f.name}' has takes_value:true but no value_pattern (fail-closed)`,
       )
     }
+    // Structural anchoring invariant: value_pattern is matched with
+    // .test(), which matches substrings anywhere in the string — an
+    // unanchored pattern (missing ^ and/or $) would let a value-flag
+    // argument smuggle extra content (e.g. an alternate host) past the
+    // check. Anchoring is enforced here as a load-time structural
+    // guarantee, not left as a catalog-authoring convention.
+    if (f.takes_value === true && f.value_pattern) {
+      const p = f.value_pattern
+      if (!(p.startsWith("^") && p.endsWith("$"))) {
+        throw new CatalogError(
+          `tool '${e.tools_name}' flag '${f.name}' has value_pattern '${p}' that is not fully anchored ` +
+            `(must start with '^' and end with '$'; .test() matches substrings, so an unanchored pattern ` +
+            `can let a value smuggle extra content past the check)`,
+        )
+      }
+    }
   }
 }
 

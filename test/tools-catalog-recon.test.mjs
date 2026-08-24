@@ -85,6 +85,14 @@ test("nmap has NO target_flag (bare positional, like curl)", () => {
   expect(nmap.requires_root).toBe(false)
 })
 
+test("nmap declares a single required 'target' positional", () => {
+  const c = loadCatalog(catalogPath)
+  const nmap = findTool(c, "nmap")
+  expect(nmap.command.positional).toEqual([
+    { name: "target", type: "string", description: "target host/CIDR", required: true },
+  ])
+})
+
 test("nmap declares the expected boolean flags", () => {
   const c = loadCatalog(catalogPath)
   const nmap = findTool(c, "nmap")

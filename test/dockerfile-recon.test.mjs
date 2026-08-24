@@ -17,14 +17,14 @@ test("has a golang builder stage", () => {
   expect(/^FROM golang\S*\s+AS\s+\S+/m.test(dockerfile)).toBe(true)
 })
 
-test("builder stage go-installs subfinder with a pinned version", () => {
-  expect(/go install\s+github\.com\/projectdiscovery\/subfinder\/v2\/cmd\/subfinder@v[\d.]+/.test(dockerfile)).toBe(
+test("builder stage go-installs subfinder pinned to the exact catalog version (v2.6.6)", () => {
+  expect(/go install\s+github\.com\/projectdiscovery\/subfinder\/v2\/cmd\/subfinder@v2\.6\.6\b/.test(dockerfile)).toBe(
     true,
   )
 })
 
-test("builder stage go-installs httpx with a pinned version", () => {
-  expect(/go install\s+github\.com\/projectdiscovery\/httpx\/cmd\/httpx@v[\d.]+/.test(dockerfile)).toBe(true)
+test("builder stage go-installs httpx pinned to the exact catalog version (v1.6.9)", () => {
+  expect(/go install\s+github\.com\/projectdiscovery\/httpx\/cmd\/httpx@v1\.6\.9\b/.test(dockerfile)).toBe(true)
 })
 
 test("final stage is debian:stable-slim", () => {

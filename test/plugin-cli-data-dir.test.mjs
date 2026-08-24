@@ -1,6 +1,6 @@
 // test/plugin-cli-data-dir.test.mjs
 //
-// Targeted fix for Fase 0.5: the plugin-mode DATA directory didn't resolve
+// Targeted fix for Phase 0.5: the plugin-mode DATA directory didn't resolve
 // correctly when the agent invokes the CLI. ${CLAUDE_PLUGIN_DATA} is only
 // exported as a real env var to hook/MCP/LSP subprocesses (proven by
 // test/plugin-e2e.test.mjs for the hook) — NOT to the agent's Bash tool

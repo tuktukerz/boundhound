@@ -71,9 +71,16 @@ test("pentest-recon/SKILL.md tools list subfinder, httpx, and nmap", () => {
 test("pentest-recon/SKILL.md orchestrates every tool exclusively via bh-exec", () => {
   const text = readFileSync(skillPath, "utf8")
   expect(text).toMatch(/bh-exec/)
-  // Never suggest running a recon tool directly (defense-in-depth with the
-  // guard hook / pentest-mode's own "ALL tools run via bh-exec" discipline).
-  expect(text).not.toMatch(/\bsubfinder\s+-d\b(?!.*bh-exec)/)
+  // Positive check: each recon tool must actually be invoked through a real
+  // `bh-exec.mjs <tool> --target` call — both the plugin-mode form (quoted
+  // path, e.g. `.../bh-exec.mjs" subfinder --target`) and the dev-mode form
+  // (`bin/bh-exec.mjs subfinder --target`) match this. A bare negative check
+  // (e.g. "no `subfinder -d` outside bh-exec") is near-vacuous — it would
+  // pass even if the skill never routed a tool through bh-exec at all — so
+  // assert the actual routing exists for every tool instead.
+  for (const tool of ["subfinder", "httpx", "nmap"]) {
+    expect(text).toMatch(new RegExp(`bh-exec\\.mjs"?\\s+${tool}\\s+--target`))
+  }
 })
 
 test("pentest-recon/SKILL.md documents the *.<domain> in_scope requirement for subdomains", () => {

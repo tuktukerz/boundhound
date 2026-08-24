@@ -1,9 +1,9 @@
 // test/acceptance.test.mjs
 //
-// End-to-end acceptance suite for Fase 0 (spec §5, T1-T12). Exercises the
+// End-to-end acceptance suite for Phase 0 (spec §5, T1-T12). Exercises the
 // real safety pipeline (runExec + classifyCommand) with an injected exec so
 // no real network calls or docker containers are needed. This file is the
-// "Fase 0 done" gate: every T assertion below MUST land on the safe outcome
+// "Phase 0 done" gate: every T assertion below MUST land on the safe outcome
 // (ALLOW where the spec says allow, DENY/exit-2 or fail-closed/exit-3 where
 // the spec says deny).
 //
