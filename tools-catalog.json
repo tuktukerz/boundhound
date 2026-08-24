@@ -1,0 +1,29 @@
+{
+  "$schema": "./docs/tools-catalog.schema.json",
+  "version": "0.0.0",
+  "categories": ["utility"],
+  "tools": [
+    {
+      "tools_name": "curl",
+      "description": "HTTP client — Fase 0 bridge test tool only",
+      "category": "utility",
+      "command": {
+        "base": "curl",
+        "flags": [
+          { "name": "-sS", "type": "boolean", "description": "silent + show errors" },
+          { "name": "-I", "type": "boolean", "description": "headers only" }
+        ],
+        "positional": [
+          { "name": "url", "type": "string", "description": "target url", "required": true }
+        ]
+      },
+      "installation": { "linux": { "command": "apt-get install -y curl", "manager": "apt" } },
+      "check_installed": { "command": "curl --version", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["utility"],
+      "tags": ["http", "bridge-test"],
+      "requires_root": false,
+      "output_format": ["text"]
+    }
+  ]
+}
