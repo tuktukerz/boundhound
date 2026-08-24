@@ -1,0 +1,25 @@
+id: nginx-detect
+
+info:
+  name: Nginx Server Header Detection
+  author: boundhound
+  severity: info
+  description: >
+    Bundled offline template for the Phase 2 enum e2e (spec §8, E2E row) —
+    detects nginx via the `Server` response header on a single GET to `/`.
+    No interactsh/OOB, no online template fetch: deterministic against a
+    local nginx:alpine target container, run with `-disable-update-check`
+    so nuclei never touches the network for its own template repo.
+  tags: tech,nginx
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "nginx"
+        case-insensitive: true
