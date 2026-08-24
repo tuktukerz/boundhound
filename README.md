@@ -4,12 +4,12 @@
 
 ---
 
-## 🚧 Status: Phase 0.5 — installable as a Claude Code plugin
+## 🚧 Status: Phase 1 — Recon
 
 ```
-[0] Foundation & Safety   ██████████ done   <- you are here
+[0] Foundation & Safety   ██████████ done
 [0.5] Plugin packaging    ██████████ done
-[1] Recon                 ░░░░░░░░░░ not started
+[1] Recon                 ██████████ done   <- you are here
 [2] Enumeration           ░░░░░░░░░░ not started
 [3] Exploitation          ░░░░░░░░░░ not started
 [4] Verification          ░░░░░░░░░░ not started
@@ -18,9 +18,11 @@
 [7] Expansion             ░░░░░░░░░░ not started
 ```
 
-**Phase 0 is deliberately zero-attack-capability.** No nmap, nuclei, or sqlmap yet — just `curl` as a bridge tool for testing. The principle: **fences first, weapons later.** No offensive tool gets installed before this safety layer is proven by automated tests.
+**Phase 0 was deliberately zero-attack-capability.** No nmap, nuclei, or sqlmap — just `curl` as a bridge tool for testing. The principle: **fences first, weapons later.** No offensive tool gets installed before the safety layer bounding it is proven by automated tests.
 
-**Phase 0.5 makes that same safety layer installable as a plugin**, so it runs from any project directory instead of only from inside this repo checkout. It changes nothing about the enforcement logic — only *where* it reads code from and writes state to.
+**Phase 0.5 made that same safety layer installable as a plugin**, so it runs from any project directory instead of only from inside this repo checkout. It changed nothing about the enforcement logic — only *where* it reads code from and writes state to.
+
+**Phase 1 adds the first real attack-surface-mapping capability: recon** — subfinder, httpx, and nmap, all still running through the same `bh-exec` choke point proven in Phase 0. See **Recon** below.
 
 ## Why this exists
 
@@ -60,8 +62,43 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 108 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 181 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
+
+## Recon
+
+Phase 1 chains three tools against the active engagement's in-scope
+targets, orchestrated by the self-authored `pentest-recon` skill (run via
+`/recon`):
+
+1. **`subfinder`** — passive subdomain discovery against the in-scope root domain.
+2. **`httpx`** — HTTP probing (status code, title, tech detection) of the root domain and any discovered subdomain that clears scope.
+3. **`nmap`** — port and service/version scanning of every live host `httpx` found.
+
+Every one of those three invocations goes through `bh-exec` exactly like
+any other tool — scope-checked, safety-capped, audited, and run inside the
+engagement's container. Nothing in recon gets a shortcut around the choke
+point proven in Phase 0.
+
+A final step, `bh-recon-map` (`bin/bh-recon-map.mjs`), reads the raw
+`subfinder`/`httpx`/`nmap` output already on disk and normalizes it into
+one `recon-map.json`, written to
+`engagements/<name>/output/recon/recon-map.json`.
+
+**Probing a discovered subdomain requires opting in to it in scope.**
+`subfinder` will often discover subdomains that were never typed into
+`scope.yaml` directly. A literal entry like `acme.io` matches only that
+exact host — it does not cover `api.acme.io`. To let `httpx`/`nmap` touch
+subdomains `subfinder` discovers under `acme.io`, `in_scope.domains` must
+explicitly include a wildcard entry, e.g. `"*.acme.io"`. Without it, recon
+still records every discovered subdomain in `subfinder.jsonl`, but does not
+probe or scan any of them.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/recon-e2e.test.mjs`](test/recon-e2e.test.mjs) — which spins up an
+actual local target container and runs the real `nmap`/`httpx` binaries
+against it through `bh-exec`, driving the actual CLIs exactly as an
+operator would.
 
 ## Install as a Claude Code plugin
 
@@ -87,7 +124,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 108 pass / 1 skip
+bun test                        # 181 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -104,11 +141,13 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   marketplace.json         self-hosted marketplace so the repo is /plugin-installable
 .claude/
   skills/pentest-mode/     active skill (engagement mode + scope selector)
-  commands/                /engagement, /mode
+  skills/pentest-recon/    active skill (Phase 1 recon orchestrator: subfinder -> httpx -> nmap -> bh-recon-map)
+  commands/                /engagement, /mode, /recon
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
   bh-engagement.mjs      scaffold a new engagement
+  bh-recon-map.mjs       merges subfinder/httpx/nmap output into recon-map.json
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -120,7 +159,8 @@ src/
   catalog/                 tools-catalog.json loader (ToolEntry schema)
   guard/                   command classification, anti-bypass
   audit/                   JSONL audit log
-docker/Dockerfile          minimal image — bridge tool only
+  recon/                   recon-map.mjs: normalizes subfinder/httpx/nmap output into recon-map.json
+docker/Dockerfile          multi-stage image — nmap + subfinder + httpx (Phase 1 recon tools)
 skills-library/            authored skill library (promoted to active per phase)
 docs/
   ARCHITECTURE.md          big-picture map & 8 phases

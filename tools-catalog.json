@@ -5,7 +5,7 @@
   "tools": [
     {
       "tools_name": "curl",
-      "description": "HTTP client — Fase 0 bridge test tool only",
+      "description": "HTTP client — Phase 0 bridge test tool only",
       "category": "utility",
       "command": {
         "base": "curl",
