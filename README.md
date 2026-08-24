@@ -41,7 +41,7 @@ User / Agent
     │ passes through bh-exec
     ▼
 ┌─────────────────────────┐   target outside scope.yaml?
-│  bh-exec               │──────────────► DENY + audit log
+│  bh-exec                │──────────────► DENY + audit log
 │  (choke point)           │
 │  scope → safety → audit  │
 └─────────────────────────┘
@@ -49,7 +49,7 @@ User / Agent
     ▼
 ┌─────────────────────────┐
 │  docker exec             │  tool runs in an isolated container
-│  (bh-<engagement>)     │
+│  (bh-<engagement>)      │
 └─────────────────────────┘
 ```
 
