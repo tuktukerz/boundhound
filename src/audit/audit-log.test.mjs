@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { appendAudit } from "./audit-log.mjs"
 
 let dir
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "omop-audit-")) })
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "bh-audit-")) })
 
 test("appends a JSON line with all fields", () => {
   const p = join(dir, "audit.log")

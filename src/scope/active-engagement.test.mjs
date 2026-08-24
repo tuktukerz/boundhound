@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { loadActiveConfig, NoActiveEngagement } from "./active-engagement.mjs"
 
 let root
-beforeEach(() => { root = mkdtempSync(join(tmpdir(), "omop-")) })
+beforeEach(() => { root = mkdtempSync(join(tmpdir(), "bh-")) })
 
 const scope = `engagement: acme
 authorization: "H1 #1"

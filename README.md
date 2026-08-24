@@ -2,113 +2,144 @@
 
 **Autonomous pentest agent, built natively on Claude Code.**
 
-> Bukan fork. OmOP ([`zakirkun/oh-my-open-pentest`](https://github.com/zakirkun/oh-my-open-pentest)) dipakai sebagai tambang skill & acuan pola — orchestrator, safety layer, dan integrasinya dibangun dari nol di atas primitives Claude Code (skills, subagents, hooks).
+> Not a fork. OmOP ([`zakirkun/oh-my-open-pentest`](https://github.com/zakirkun/oh-my-open-pentest)) is used as a skill mine and pattern reference — the orchestrator, safety layer, and integration are built from scratch on top of Claude Code primitives (skills, subagents, hooks).
 
 ---
 
-## 🚧 Status: Fase 0 — Fondasi & Safety
+## 🚧 Status: Phase 0.5 — installable as a Claude Code plugin
 
 ```
-[0] Fondasi & Safety   ██████████ selesai   <- kamu di sini
-[1] Recon              ░░░░░░░░░░ belum
-[2] Enumeration        ░░░░░░░░░░ belum
-[3] Exploitation       ░░░░░░░░░░ belum
-[4] Verification       ░░░░░░░░░░ belum
-[5] Reporting          ░░░░░░░░░░ belum
-[6] Orchestrator       ░░░░░░░░░░ belum
-[7] Ekspansi           ░░░░░░░░░░ belum
+[0] Foundation & Safety   ██████████ done   <- you are here
+[0.5] Plugin packaging    ██████████ done
+[1] Recon                 ░░░░░░░░░░ not started
+[2] Enumeration           ░░░░░░░░░░ not started
+[3] Exploitation          ░░░░░░░░░░ not started
+[4] Verification          ░░░░░░░░░░ not started
+[5] Reporting             ░░░░░░░░░░ not started
+[6] Orchestrator          ░░░░░░░░░░ not started
+[7] Expansion             ░░░░░░░░░░ not started
 ```
 
-**Fase 0 sengaja nol kemampuan serang.** Belum ada nmap, nuclei, sqlmap — cuma `curl` sebagai tool uji jembatan. Prinsipnya: **pagar duluan, senjata belakangan.** Tidak ada tool serang yang boleh terpasang sebelum lapisan keamanan ini terbukti lewat test otomatis.
+**Phase 0 is deliberately zero-attack-capability.** No nmap, nuclei, or sqlmap yet — just `curl` as a bridge tool for testing. The principle: **fences first, weapons later.** No offensive tool gets installed before this safety layer is proven by automated tests.
 
-## Kenapa ini dibikin
+**Phase 0.5 makes that same safety layer installable as a plugin**, so it runs from any project directory instead of only from inside this repo checkout. It changes nothing about the enforcement logic — only *where* it reads code from and writes state to.
 
-Pentest agent otonom itu berbahaya kalau nggak ada batas keras. Kebanyakan tool "AI pentest" mengandalkan agent untuk *patuh* pada scope — itu imbauan, bukan penegakan. Boundhound membalik itu: **agent secara teknis tidak bisa** menyentuh target di luar scope, karena penegakannya ada di lapisan yang agent tidak kontrol (git-tracked hook + choke-point CLI), bukan di prompt.
+## Why this exists
 
-## Cara kerja keamanannya
+An autonomous pentest agent is dangerous without hard limits. Most "AI pentest" tools rely on the agent *choosing* to respect scope — that's a request, not enforcement. Boundhound inverts that: **the agent is technically unable** to touch out-of-scope targets, because enforcement lives in a layer the agent doesn't control (a git-tracked hook + a CLI choke point), not in a prompt.
+
+## How the safety works
 
 ```
 User / Agent
     │
     ▼
-┌─────────────────────────┐   perintah langsung ke curl/nmap/dst?
-│  PreToolUse hook         │──────────────► DENY (bypass diblokir)
+┌─────────────────────────┐   direct command to curl/nmap/etc?
+│  PreToolUse hook         │──────────────► DENY (bypass blocked)
 │  (scope-guard.mjs)       │
 └─────────────────────────┘
-    │ lolos via omop-exec
+    │ passes through bh-exec
     ▼
-┌─────────────────────────┐   target di luar scope.yaml?
-│  omop-exec               │──────────────► DENY + audit log
+┌─────────────────────────┐   target outside scope.yaml?
+│  bh-exec                │──────────────► DENY + audit log
 │  (choke point)           │
-│  scope → safety → audit │
+│  scope → safety → audit  │
 └─────────────────────────┘
     │ ALLOW
     ▼
 ┌─────────────────────────┐
-│  docker exec             │  tool jalan di container terisolasi
-│  (omop-<engagement>)     │
+│  docker exec             │  tool runs in an isolated container
+│  (bh-<engagement>)      │
 └─────────────────────────┘
 ```
 
-- **Deny-by-default** — target tidak eksplisit di `in_scope` → ditolak. Ragu → ditolak.
-- **Fail-closed** — `scope.yaml` rusak atau tidak ada engagement aktif → semua ditolak.
-- **`out_of_scope` menang** atas `in_scope` — pengecualian eksplisit selalu diprioritaskan.
-- **Dua lapis independen** — hook mencegah agent *menghindari* `omop-exec`; `omop-exec` sendiri yang melakukan pengecekan sebenarnya.
-- **Audit penuh** — setiap keputusan (ALLOW/DENY) tercatat: timestamp, target, tool, alasan, otorisasi.
+- **Deny-by-default** — a target not explicitly listed in `in_scope` is rejected. When in doubt, rejected.
+- **Fail-closed** — a broken `scope.yaml` or no active engagement means everything is rejected.
+- **`out_of_scope` wins** over `in_scope` — explicit exclusions always take priority.
+- **Two independent layers** — the hook stops the agent from *avoiding* `bh-exec`; `bh-exec` itself does the real check.
+- **Full audit trail** — every decision (ALLOW/DENY) is logged: timestamp, target, tool, reason, authorization.
 
-Semua diverifikasi lewat [`test/acceptance.test.mjs`](test/acceptance.test.mjs) — bukan klaim, ada buktinya:
+All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
+
+```bash
+bun test   # 108 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+```
+
+## Install as a Claude Code plugin
 
 ```
-75 pass · 1 skip (Docker smoke, butuh container hidup) · 0 fail
+/plugin marketplace add tuktukerz/boundhound
+/plugin install boundhound@tuktukerz-marketplace
 ```
 
-## Quickstart
+Once installed, the **scope-guard hook enforces from any project directory** — you no longer need to be inside this repo checkout for the safety layer to be active. This is a hard guarantee: Claude Code exports `${CLAUDE_PLUGIN_ROOT}` directly to the hook's subprocess environment, and it's proven by `test/plugin-e2e.test.mjs`, which runs the hook from a foreign cwd with nothing pointing at this repo and confirms the DENY + audit trail still land correctly.
+
+`/engagement` and `/mode` are wired the same way — their instructions invoke `node "${CLAUDE_PLUGIN_ROOT}/bin/bh-engagement.mjs" ... --data-dir "${CLAUDE_PLUGIN_DATA}"` rather than a bare relative path — but that convenience path depends on Claude Code resolving both placeholders inline in skill/command content and the agent following the written instruction, which is a documented mechanism but not the same kind of hard runtime guarantee the hook has. See **Known limitations** below.
+
+Engagement state (scope files, `.active`, audit logs) lives under the plugin's own data directory (`${CLAUDE_PLUGIN_DATA}`), so it persists across plugin updates instead of being wiped when the plugin's code is refreshed. The CLI (`bh-exec.mjs` / `bh-engagement.mjs`) receives that path via an explicit `--data-dir "${CLAUDE_PLUGIN_DATA}"` argument, content-substituted the same way `${CLAUDE_PLUGIN_ROOT}` already is in the script path — **not** by reading `CLAUDE_PLUGIN_DATA` as an environment variable at runtime. That distinction matters: Claude Code exports `CLAUDE_PLUGIN_DATA` as a real env var only to hook/MCP/LSP subprocesses, not to the agent's Bash tool session, so a CLI process spawned via Bash never sees it in its own `process.env` — without `--data-dir`, `dataRoot()` would silently fall back to the current working directory instead. Passing it explicitly as a CLI argument is what makes the CLI's state and audit log land in the same directory the hook (which does get the env var) already uses — see `test/plugin-cli-data-dir.test.mjs`.
+
+## Known limitations
+
+- **One active engagement per installation.** Engagement state — including the single `.active` pointer file — lives under one shared `${CLAUDE_PLUGIN_DATA}` directory for the whole plugin installation, not per-project. Treat only one engagement as active at a time. Running different engagements concurrently from different project directories against the same installed plugin is **not yet supported**: they would share `.active` and could misattribute the audit trail (e.g. a tool run kicked off from project B could get logged against project A's engagement). This is a known gap for future work, not a safety bug — the deny-by-default/fail-closed guarantees still hold for whichever engagement is actually active.
+- **`/engagement` and `/mode` are agent-instruction-dependent, not hook-enforced.** They rely on the agent following the `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_PLUGIN_DATA}`-qualified invocation written into the `pentest-mode` skill and command files (see that skill's "Invoking the scripts" section). The scope-guard hook has no such dependency — it is registered directly with Claude Code and fires unconditionally.
+
+## Run from a clone (dev mode)
+
+The alternative to installing as a plugin: clone the repo and run everything locally, with state kept inside the checkout (`$CLAUDE_PROJECT_DIR`) instead of `${CLAUDE_PLUGIN_DATA}`. Useful for developing Boundhound itself.
 
 ```bash
 bun install
-bun test                        # 75 pass / 1 skip
+bun test                        # 108 pass / 1 skip
 
-bin/omop-container up smoke     # nyalain container tool
-node bin/omop-engagement.mjs acme   # scaffold engagement baru -> isi scope.yaml
-node bin/omop-exec.mjs curl --target api.acme.io -- -I   # jalanin tool via choke point
+bin/bh-container up smoke     # start the tool container
+node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
+node bin/bh-exec.mjs curl --target api.acme.io -- -I   # run a tool through the choke point
 ```
 
-## Struktur
+In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_PROJECT_DIR`/cwd (see `dataRoot()` in `src/paths.mjs`). `--data-dir <path>` is accepted by both scripts in any mode and, when passed, always wins over the env-var fallback.
+
+## Structure
 
 ```
+.claude-plugin/
+  plugin.json              plugin manifest (skills/commands/hooks entry points)
+  marketplace.json         self-hosted marketplace so the repo is /plugin-installable
 .claude/
-  skills/pentest-mode/     skill aktif (dipanen dari OmOP, di-tuning ke sistem kita)
+  skills/pentest-mode/     active skill (harvested from OmOP, tuned to our system)
   commands/                /engagement, /mode
-  settings.json            registrasi PreToolUse hook
+  settings.json            PreToolUse hook registration (dev/project mode)
 bin/
-  omop-exec.mjs            choke point: scope + safety + audit -> docker exec
-  omop-engagement.mjs      scaffold engagement baru
-  omop-container           lifecycle container Docker
-hooks/scope-guard.mjs      cegah bypass omop-exec
+  bh-exec.mjs            choke point: scope + safety + audit -> docker exec
+  bh-engagement.mjs      scaffold a new engagement
+  bh-container           Docker container lifecycle
+hooks/
+  scope-guard.mjs          blocks bh-exec bypass attempts
+  hooks.json               PreToolUse hook registration (plugin mode, ${CLAUDE_PLUGIN_ROOT})
 src/
+  paths.mjs                code root vs data root resolution (plugin vs local-project)
   scope/                   parser + matcher (deny-by-default) + fail-closed resolver
-  safety/                  blok aksi destruktif/DoS
-  catalog/                 tools-catalog.json loader (schema ToolEntry ala OmOP)
-  guard/                   klasifikasi command, anti-bypass
-  audit/                   audit log JSONL
-docker/Dockerfile          image ramping — cuma tool uji jembatan
-skills-library/            arsip skill OmOP (referensi, belum aktif)
+  safety/                  blocks destructive/DoS actions
+  catalog/                 tools-catalog.json loader (ToolEntry schema, OmOP-style)
+  guard/                   command classification, anti-bypass
+  audit/                   JSONL audit log
+docker/Dockerfile          minimal image — bridge tool only
+skills-library/            archived OmOP skills (reference, not yet active)
 docs/
-  ARCHITECTURE.md          peta besar & 8 fase
-  specs/, plans/           spec & implementation plan per fase
+  ARCHITECTURE.md          big-picture map & 8 phases
+  specs/, plans/           spec & implementation plan per phase
 ```
 
-## Prinsip desain
+## Design principles
 
-1. **Safety sebelum kemampuan.** Setiap fase kemampuan baru (recon, exploit, dst) dibangun di atas fondasi yang sudah lolos test — bukan sebaliknya.
-2. **Panen, jangan fork.** Skill OmOP (250 `SKILL.md`) diambil sebagai bahan baku, ditaruh di `skills-library/`, dipromosikan ke skill aktif satu-satu sambil di-tuning — bukan diimpor mentah-mentah.
-3. **Enforcement, bukan imbauan.** Kalau sesuatu harus benar, itu dipaksa oleh kode/hook — bukan cuma ditulis di instruksi agent.
-4. **Setiap task = TDD + review adversarial.** Dibangun lewat subagent-driven development: setiap modul ditulis test-first, di-review subagent independen, dan setiap temuan (termasuk beberapa bug nyata — bypass guard, hook fail-open, `import.meta.main` yang mati di Node) ditutup dengan regression test sebelum lanjut.
+1. **Safety before capability.** Every new capability phase (recon, exploit, etc.) is built on a foundation that has already passed its tests — not the other way around.
+2. **Harvest, don't fork.** OmOP's skills (250 `SKILL.md` files) are taken as raw material, kept in `skills-library/`, and promoted to active skills one at a time while being tuned — not imported wholesale.
+3. **Enforcement, not instruction.** When something must hold true, it's enforced by code/hooks — not just written into agent instructions.
+4. **Every task = TDD + adversarial review.** Built via subagent-driven development: each module is written test-first, reviewed by an independent subagent, and every finding (including real bugs — a guard bypass, a fail-open hook, a dead `import.meta.main` check on Node) is closed with a regression test before moving on.
 
 ## Roadmap
 
-Lihat [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) untuk peta lengkap 8 fase, keputusan desain, dan alasan di balik setiap pilihan arsitektur.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full map of all 8 phases, design decisions, and the reasoning behind each architectural choice.
 
 ---
 
-*Dibangun secara iteratif: brainstorming → grilling → spec → plan → subagent-driven implementation, tiap langkah direview sebelum lanjut.*
+*Built iteratively: brainstorming → grilling → spec → plan → subagent-driven implementation, each step reviewed before moving on.*

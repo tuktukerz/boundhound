@@ -29,16 +29,16 @@ Dua metrik yang tidak bisa ditawar: **(1)** output = report yang beneran kepakai
 |---|---|
 | Skill playbook (recon, xss, sqli, dst) | Frontmatter OmOP + `.claude/skills/*/SKILL.md` (aktif) + `skills-library/` (arsip 250) |
 | Registry tool | `tools-catalog.json` (schema `ToolEntry` OmOP) + `command-builder` |
-| Eksekusi tool (nmap, nuclei, sqlmap) | `bin/omop-exec` → `docker exec` ke container Linux |
+| Eksekusi tool (nmap, nuclei, sqlmap) | `bin/bh-exec` → `docker exec` ke container Linux |
 | Tool via MCP (mis. Burp Suite) | MCP server native Claude Code (on-pattern; OmOP juga pakai MCP) — lihat §7 |
 | Orchestrator (recon→…→report) | Master skill yang menyetir **subagents** per fase |
 | `/engagement`, `/fullscan` | `.claude/commands/*.md` |
 | Engagement mode | Skill / argumen command |
-| **Scope enforcement** | **Hook** `PreToolUse` di `.claude/settings.json` + choke point `omop-run` |
-| Safety profile (anti-destruktif/DoS) | Aturan di `omop-run` |
+| **Scope enforcement** | **Hook** `PreToolUse` di `.claude/settings.json` + choke point `bh-exec` |
+| Safety profile (anti-destruktif/DoS) | Aturan di `bh-exec` |
 | Verification layer | Subagent "verify" khusus |
 | Report | Skill "report" (CVSS, PoC, repro) |
-| Chain-of-custody / audit | `omop-run` menulis `engagements/<t>/audit.log` |
+| Chain-of-custody / audit | `bh-exec` menulis `engagements/<t>/audit.log` |
 
 ---
 
@@ -91,10 +91,10 @@ boundhound/
 │   ├── commands/            # /engagement, /mode, ... (format OmOP)
 │   └── skills/              # skill AKTIF (dipromosikan per-fase)
 ├── bin/
-│   ├── omop-exec            # bangun cmd dari katalog → scope+safety → docker exec
-│   └── omop-engagement      # scaffold engagement + set aktif + container up
+│   ├── bh-exec            # bangun cmd dari katalog → scope+safety → docker exec
+│   └── bh-engagement      # scaffold engagement + set aktif + container up
 ├── hooks/
-│   └── scope-guard.mjs      # enforcement PreToolUse; cegah bypass omop-exec
+│   └── scope-guard.mjs      # enforcement PreToolUse; cegah bypass bh-exec
 ├── src/
 │   ├── catalog/             # loader tools-catalog.json (pola OmOP)
 │   └── command-builder/     # bangun perintah dari ToolEntry.flags

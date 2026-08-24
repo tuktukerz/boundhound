@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { classifyCommand } from "../src/guard/guard.mjs"
 import { activeName } from "../src/scope/active-engagement.mjs"
 import { appendAudit } from "../src/audit/audit-log.mjs"
+import { dataRoot } from "../src/paths.mjs"
 
 const NETWORK_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SCOPE_FILE_RE = /engagements\/[^/]+\/scope\.yaml$/
@@ -21,7 +22,7 @@ export function decideFromEvent(event) {
     return mk(r.decision === "ALLOW" ? "allow" : "deny", r.reason)
   }
   if (NETWORK_TOOLS.has(event.tool_name)) {
-    return mk("deny", `${event.tool_name} not yet threaded through scope enforcement (Fase 0) — use omop-exec`)
+    return mk("deny", `${event.tool_name} not yet threaded through scope enforcement (Fase 0) — use bh-exec`)
   }
   if ((event.tool_name === "Write" || event.tool_name === "Edit") && SCOPE_FILE_RE.test(event.tool_input?.file_path ?? "")) {
     return mk("deny", "scope.yaml is the trust root — edit only via /engagement or /mode, not directly")
@@ -30,8 +31,8 @@ export function decideFromEvent(event) {
 }
 
 // Best-effort audit of a hook-level DENY (an attempted bypass caught before
-// omop-exec even ran). Allowed Bash commands are already audited by
-// omop-exec itself when they take the sanctioned path, so only DENYs are
+// bh-exec even ran). Allowed Bash commands are already audited by
+// bh-exec itself when they take the sanctioned path, so only DENYs are
 // logged here — auditing every allowed `git status`/`ls` would be noise.
 // Failures here (no active engagement, unwritable audit log, etc.) must
 // never change the hook's actual permission decision.
@@ -72,7 +73,7 @@ if (isMain) {
     out = failClosed("hook error (fail-closed)")
   }
   if (out.hookSpecificOutput.permissionDecision === "deny") {
-    auditHookDeny(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), {
+    auditHookDeny(dataRoot(), {
       tool: event.tool_name,
       detail: event.tool_input?.command ?? event.tool_input?.file_path ?? event.tool_input?.url ?? null,
       reason: out.hookSpecificOutput.permissionDecisionReason,

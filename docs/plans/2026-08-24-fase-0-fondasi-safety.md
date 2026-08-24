@@ -4,7 +4,7 @@
 
 **Goal:** Bangun kerangka repo bergaya OmOP + lapisan safety yang benar-benar dipaksa (scope enforcement deny-by-default via hook Claude Code), tanpa satu pun tool serang.
 
-**Architecture:** Logika inti (scope matcher, safety check, catalog loader, command-builder, guard, audit) ditulis sebagai modul **Node ESM `.mjs`** murni — tanpa build step, bisa di-`import` langsung oleh hook & CLI. Enforcement dua lapis: hook `PreToolUse` (cegah bypass) + `bin/omop-exec` (cek scope+safety sebenarnya sebelum `docker exec`). Semua tervalidasi lewat `bun test`.
+**Architecture:** Logika inti (scope matcher, safety check, catalog loader, command-builder, guard, audit) ditulis sebagai modul **Node ESM `.mjs`** murni — tanpa build step, bisa di-`import` langsung oleh hook & CLI. Enforcement dua lapis: hook `PreToolUse` (cegah bypass) + `bin/bh-exec` (cek scope+safety sebenarnya sebelum `docker exec`). Semua tervalidasi lewat `bun test`.
 
 **Tech Stack:** Node ESM (`.mjs`), `bun test`, YAML (`yaml` pkg), Docker CLI, Claude Code hooks & commands.
 
@@ -36,8 +36,8 @@
 
 **Runtime glue:**
 - `hooks/scope-guard.mjs` — hook `PreToolUse`: stdin JSON → guard → output keputusan.
-- `bin/omop-exec.mjs` — CLI eksekusi tool (scope+safety+audit → `docker exec`).
-- `bin/omop-engagement.mjs` — scaffold engagement + set `.active` + container up.
+- `bin/bh-exec.mjs` — CLI eksekusi tool (scope+safety+audit → `docker exec`).
+- `bin/bh-engagement.mjs` — scaffold engagement + set `.active` + container up.
 
 **Konfigurasi / aset:**
 - `package.json`, `.gitignore`, `tools-catalog.json`, `docker/Dockerfile`.
@@ -408,7 +408,7 @@ import { join } from "node:path"
 import { loadActiveConfig, NoActiveEngagement } from "./active-engagement.mjs"
 
 let root
-beforeEach(() => { root = mkdtempSync(join(tmpdir(), "omop-")) })
+beforeEach(() => { root = mkdtempSync(join(tmpdir(), "bh-")) })
 
 const scope = `engagement: acme
 authorization: "H1 #1"
@@ -794,7 +794,7 @@ import { join } from "node:path"
 import { appendAudit } from "./audit-log.mjs"
 
 let dir
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "omop-audit-")) })
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "bh-audit-")) })
 
 test("appends a JSON line with all fields", () => {
   const p = join(dir, "audit.log")
@@ -853,7 +853,7 @@ git commit -m "feat(audit): append-only JSONL audit log"
 - Test: `src/guard/guard.test.mjs`
 
 **Interfaces:**
-- Produces: `classifyCommand(cmd) -> {decision:"ALLOW"|"DENY", reason}`. ALLOW jika perintah lewat `omop-exec` atau non-jaringan; DENY jika binari jaringan langsung atau `docker exec` bukan via `omop-exec`.
+- Produces: `classifyCommand(cmd) -> {decision:"ALLOW"|"DENY", reason}`. ALLOW jika perintah lewat `bh-exec` atau non-jaringan; DENY jika binari jaringan langsung atau `docker exec` bukan via `bh-exec`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -862,12 +862,12 @@ git commit -m "feat(audit): append-only JSONL audit log"
 import { test, expect } from "bun:test"
 import { classifyCommand } from "./guard.mjs"
 
-test("allows commands via omop-exec", () => {
-  expect(classifyCommand("omop-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
+test("allows commands via bh-exec", () => {
+  expect(classifyCommand("bh-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
 })
 
-test("allows omop-exec by absolute path", () => {
-  expect(classifyCommand("/repo/bin/omop-exec.mjs curl --target x").decision).toBe("ALLOW")
+test("allows bh-exec by absolute path", () => {
+  expect(classifyCommand("/repo/bin/bh-exec.mjs curl --target x").decision).toBe("ALLOW")
 })
 
 test("denies direct network binary", () => {
@@ -876,8 +876,8 @@ test("denies direct network binary", () => {
   expect(classifyCommand("wget http://x").decision).toBe("DENY")
 })
 
-test("denies docker exec that bypasses omop-exec", () => {
-  expect(classifyCommand("docker exec omop-acme curl evil.com").decision).toBe("DENY")
+test("denies docker exec that bypasses bh-exec", () => {
+  expect(classifyCommand("docker exec bh-acme curl evil.com").decision).toBe("DENY")
 })
 
 test("allows benign non-network commands", () => {
@@ -907,8 +907,8 @@ const NETWORK_BINS = [
   "sqlmap", "nikto", "subfinder", "amass", "katana", "dalfox",
 ]
 
-function isOmopExec(token) {
-  return token === "omop-exec" || /(^|\/)omop-exec(\.mjs)?$/.test(token)
+function isBhExec(token) {
+  return token === "bh-exec" || /(^|\/)bh-exec(\.mjs)?$/.test(token)
 }
 
 export function classifyCommand(cmd) {
@@ -918,15 +918,15 @@ export function classifyCommand(cmd) {
   for (const part of parts) {
     const tokens = part.split(/\s+/)
     const head = tokens[0] ?? ""
-    if (isOmopExec(head)) continue // sanctioned path
+    if (isBhExec(head)) continue // sanctioned path
     // docker exec bypass
     if (head === "docker" && tokens[1] === "exec") {
-      return { decision: "DENY", reason: "docker-exec bypass (use omop-exec)" }
+      return { decision: "DENY", reason: "docker-exec bypass (use bh-exec)" }
     }
     // direct network binary anywhere as a command head
     const base = head.split("/").pop()
     if (NETWORK_BINS.includes(base)) {
-      return { decision: "DENY", reason: `direct network tool '${base}' (use omop-exec)` }
+      return { decision: "DENY", reason: `direct network tool '${base}' (use bh-exec)` }
     }
   }
   return { decision: "ALLOW", reason: "non-network-or-sanctioned" }
@@ -976,8 +976,8 @@ test("Bash direct curl -> deny", () => {
   expect(out.hookSpecificOutput.permissionDecision).toBe("deny")
 })
 
-test("Bash via omop-exec -> allow", () => {
-  const out = decideFromEvent({ tool_name: "Bash", tool_input: { command: "omop-exec curl --target x" } })
+test("Bash via bh-exec -> allow", () => {
+  const out = decideFromEvent({ tool_name: "Bash", tool_input: { command: "bh-exec curl --target x" } })
   expect(out.hookSpecificOutput.permissionDecision).toBe("allow")
 })
 ```
@@ -1058,32 +1058,32 @@ git commit -m "feat(hook): PreToolUse scope-guard + settings.json registration"
 
 ---
 
-### Task 11: `bin/omop-exec.mjs` (choke point eksekusi)
+### Task 11: `bin/bh-exec.mjs` (choke point eksekusi)
 
 **Files:**
-- Create: `bin/omop-exec.mjs`
-- Test: `bin/omop-exec.test.mjs`
+- Create: `bin/bh-exec.mjs`
+- Test: `bin/bh-exec.test.mjs`
 
 **Interfaces:**
 - Consumes: Tasks 3,4,5,6,7,8.
-- Produces: `runExec(argv, {rootDir, now, exec}) -> {code, message}`. `argv` = args setelah `omop-exec` (mis. `["curl","--target","api.acme.io","--","-I"]`). `exec(cmdArray)` diinjeksi (default `docker exec`); `now()` diinjeksi. Exit codes: 0 ALLOW, 2 DENY, 3 fail-closed.
+- Produces: `runExec(argv, {rootDir, now, exec}) -> {code, message}`. `argv` = args setelah `bh-exec` (mis. `["curl","--target","api.acme.io","--","-I"]`). `exec(cmdArray)` diinjeksi (default `docker exec`); `now()` diinjeksi. Exit codes: 0 ALLOW, 2 DENY, 3 fail-closed.
 
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
-// bin/omop-exec.test.mjs
+// bin/bh-exec.test.mjs
 import { test, expect, beforeEach } from "bun:test"
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runExec } from "./omop-exec.mjs"
+import { runExec } from "./bh-exec.mjs"
 
 let root, calls
 const now = () => "2026-08-24T00:00:00Z"
 const exec = (arr) => { calls.push(arr); return 0 }
 
 function setup(scope) {
-  root = mkdtempSync(join(tmpdir(), "omop-exec-"))
+  root = mkdtempSync(join(tmpdir(), "bh-exec-"))
   mkdirSync(join(root, "engagements", "acme"), { recursive: true })
   writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
   writeFileSync(join(root, "engagements", ".active"), "acme")
@@ -1129,13 +1129,13 @@ test("destructive arg -> DENY exit 2", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun test bin/omop-exec.test.mjs`
+Run: `bun test bin/bh-exec.test.mjs`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```javascript
-// bin/omop-exec.mjs
+// bin/bh-exec.mjs
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
 import { loadActiveConfig, activeName } from "../src/scope/active-engagement.mjs"
@@ -1159,7 +1159,7 @@ const dockerExec = (name, cmdArray) =>
   execFileSync("docker", ["exec", name, ...cmdArray], { stdio: "inherit" })
 
 export function runExec(argv, { rootDir, now, exec } = {}) {
-  const runner = exec ?? ((cmdArray) => dockerExec(`omop-${cfgName}`, cmdArray))
+  const runner = exec ?? ((cmdArray) => dockerExec(`bh-${cfgName}`, cmdArray))
   const stamp = (now ?? (() => new Date().toISOString()))()
   let cfg, cfgName
   try {
@@ -1204,40 +1204,40 @@ if (import.meta.main) {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun test bin/omop-exec.test.mjs`
+Run: `bun test bin/bh-exec.test.mjs`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bin/omop-exec.mjs bin/omop-exec.test.mjs
-git commit -m "feat(exec): omop-exec choke point (scope+safety+audit -> docker exec)"
+git add bin/bh-exec.mjs bin/bh-exec.test.mjs
+git commit -m "feat(exec): bh-exec choke point (scope+safety+audit -> docker exec)"
 ```
 
 ---
 
-### Task 12: `bin/omop-engagement.mjs` + scope template
+### Task 12: `bin/bh-engagement.mjs` + scope template
 
 **Files:**
-- Create: `bin/omop-engagement.mjs`, `engagements/templates/scope.yaml`
-- Test: `bin/omop-engagement.test.mjs`
+- Create: `bin/bh-engagement.mjs`, `engagements/templates/scope.yaml`
+- Test: `bin/bh-engagement.test.mjs`
 
 **Interfaces:**
-- Produces: `createEngagement(name, {rootDir, containerUp}) -> {path}`. Menulis `engagements/<name>/scope.yaml` dari template (jika belum ada), set `engagements/.active`, panggil `containerUp(name)` (diinjeksi; default = `omop-container up`).
+- Produces: `createEngagement(name, {rootDir, containerUp}) -> {path}`. Menulis `engagements/<name>/scope.yaml` dari template (jika belum ada), set `engagements/.active`, panggil `containerUp(name)` (diinjeksi; default = `bh-container up`).
 
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
-// bin/omop-engagement.test.mjs
+// bin/bh-engagement.test.mjs
 import { test, expect, beforeEach } from "bun:test"
 import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createEngagement } from "./omop-engagement.mjs"
+import { createEngagement } from "./bh-engagement.mjs"
 
 let root, upCalls
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "omop-eng-"))
+  root = mkdtempSync(join(tmpdir(), "bh-eng-"))
   mkdirSync(join(root, "engagements", "templates"), { recursive: true })
   writeFileSync(join(root, "engagements", "templates", "scope.yaml"), "engagement: REPLACE_ME\n")
   upCalls = []
@@ -1260,7 +1260,7 @@ test("does not overwrite an existing scope.yaml", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun test bin/omop-engagement.test.mjs`
+Run: `bun test bin/bh-engagement.test.mjs`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write template + implementation**
@@ -1285,7 +1285,7 @@ notes: ""
 ```
 
 ```javascript
-// bin/omop-engagement.mjs
+// bin/bh-engagement.mjs
 import { join } from "node:path"
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
@@ -1299,28 +1299,28 @@ export function createEngagement(name, { rootDir, containerUp } = {}) {
     writeFileSync(scopePath, tpl.replace("REPLACE_ME", name))
   }
   writeFileSync(join(rootDir, "engagements", ".active"), name)
-  const up = containerUp ?? ((n) => execFileSync("bin/omop-container", ["up", n], { stdio: "inherit" }))
+  const up = containerUp ?? ((n) => execFileSync("bin/bh-container", ["up", n], { stdio: "inherit" }))
   up(name)
   return { path: dir }
 }
 
 if (import.meta.main) {
   const name = process.argv[2]
-  if (!name) { process.stderr.write("usage: omop-engagement <name>\n"); process.exit(1) }
+  if (!name) { process.stderr.write("usage: bh-engagement <name>\n"); process.exit(1) }
   const { path } = createEngagement(name, { rootDir: process.env.CLAUDE_PROJECT_DIR ?? process.cwd() })
-  process.stdout.write(`engagement ready: ${path}\nedit scope.yaml, then run tools via omop-exec.\n`)
+  process.stdout.write(`engagement ready: ${path}\nedit scope.yaml, then run tools via bh-exec.\n`)
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun test bin/omop-engagement.test.mjs`
+Run: `bun test bin/bh-engagement.test.mjs`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add bin/omop-engagement.mjs engagements/templates/
+git add bin/bh-engagement.mjs engagements/templates/
 git commit -m "feat(engagement): scaffold engagement + scope template + set active"
 ```
 
@@ -1329,11 +1329,11 @@ git commit -m "feat(engagement): scaffold engagement + scope template + set acti
 ### Task 13: Docker foundation + container lifecycle
 
 **Files:**
-- Create: `docker/Dockerfile`, `bin/omop-container`
+- Create: `docker/Dockerfile`, `bin/bh-container`
 - Test: `docker/bridge-smoke.test.mjs` (integration; butuh Docker)
 
 **Interfaces:**
-- Produces: image `boundhound:base`; `bin/omop-container up|down|status <name>`.
+- Produces: image `boundhound:base`; `bin/bh-container up|down|status <name>`.
 
 - [ ] **Step 1: Write the failing integration test**
 
@@ -1342,9 +1342,9 @@ git commit -m "feat(engagement): scaffold engagement + scope template + set acti
 import { test, expect } from "bun:test"
 import { execFileSync } from "node:child_process"
 
-// Requires: docker available + image built + container omop-smoke up.
+// Requires: docker available + image built + container bh-smoke up.
 test("curl runs inside the container", () => {
-  const out = execFileSync("docker", ["exec", "omop-smoke", "curl", "--version"], { encoding: "utf8" })
+  const out = execFileSync("docker", ["exec", "bh-smoke", "curl", "--version"], { encoding: "utf8" })
   expect(out).toMatch(/curl \d/)
 })
 ```
@@ -1369,9 +1369,9 @@ CMD ["sleep", "infinity"]
 
 ```bash
 #!/usr/bin/env bash
-# bin/omop-container
+# bin/bh-container
 set -euo pipefail
-action="${1:-}"; name="${2:-default}"; cname="omop-${name}"
+action="${1:-}"; name="${2:-default}"; cname="bh-${name}"
 case "$action" in
   up)
     docker image inspect boundhound:base >/dev/null 2>&1 || \
@@ -1381,25 +1381,25 @@ case "$action" in
     echo "container up: $cname" ;;
   down) docker rm -f "$cname" >/dev/null 2>&1 || true; echo "down: $cname" ;;
   status) docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || echo "absent" ;;
-  *) echo "usage: omop-container up|down|status <name>"; exit 1 ;;
+  *) echo "usage: bh-container up|down|status <name>"; exit 1 ;;
 esac
 ```
 
-Run: `chmod +x bin/omop-container`
+Run: `chmod +x bin/bh-container`
 
 - [ ] **Step 4: Build + bring up smoke container, run test**
 
 ```bash
-bin/omop-container up smoke
+bin/bh-container up smoke
 bun test docker/bridge-smoke.test.mjs
-bin/omop-container down smoke
+bin/bh-container down smoke
 ```
 Expected: test PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docker/Dockerfile bin/omop-container docker/bridge-smoke.test.mjs
+git add docker/Dockerfile bin/bh-container docker/bridge-smoke.test.mjs
 git commit -m "feat(docker): lean base image + container lifecycle + bridge smoke test"
 ```
 
@@ -1435,9 +1435,9 @@ description: Mulai engagement pentest baru — isi scope, set aktif, nyalakan co
 Load and follow the `pentest-mode` skill.
 
 1. Tanyakan ke user: nama engagement, authorization (bukti izin), mode, dan daftar in_scope/out_of_scope.
-2. Jalankan: `node bin/omop-engagement.mjs <nama>`
+2. Jalankan: `node bin/bh-engagement.mjs <nama>`
 3. Tulis jawaban user ke `engagements/<nama>/scope.yaml` (ikuti template).
-4. Ingatkan: semua tool HANYA boleh dijalankan lewat `omop-exec`.
+4. Ingatkan: semua tool HANYA boleh dijalankan lewat `bh-exec`.
 </command-instruction>
 
 <user-request>
@@ -1499,7 +1499,7 @@ import { test, expect, beforeEach } from "bun:test"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runExec } from "../bin/omop-exec.mjs"
+import { runExec } from "../bin/bh-exec.mjs"
 import { classifyCommand } from "../src/guard/guard.mjs"
 
 let root, calls
@@ -1518,7 +1518,7 @@ function catalog() {
     category: "utility", command: { base: "curl", flags: [], positional: [{ name: "url", required: true }] }, phase: ["utility"] }] })
 }
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "omop-acc-"))
+  root = mkdtempSync(join(tmpdir(), "bh-acc-"))
   mkdirSync(join(root, "engagements", "acme"), { recursive: true })
   writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
   writeFileSync(join(root, "engagements", ".active"), "acme")
@@ -1535,7 +1535,7 @@ test("T1 in-scope ALLOW + audit", () => {
 test("T2 out-of-scope DENY", () => { expect(run(["curl", "--target", "evil.com", "--"]).code).toBe(2) })
 test("T3 out_of_scope wins DENY", () => { expect(run(["curl", "--target", "blog.acme.com", "--"]).code).toBe(2) })
 test("T4 direct curl bypass -> guard DENY", () => { expect(classifyCommand("curl https://evil.com").decision).toBe("DENY") })
-test("T5 docker exec bypass -> guard DENY", () => { expect(classifyCommand("docker exec omop-acme curl evil.com").decision).toBe("DENY") })
+test("T5 docker exec bypass -> guard DENY", () => { expect(classifyCommand("docker exec bh-acme curl evil.com").decision).toBe("DENY") })
 test("T6 no active engagement -> fail-closed 3", () => {
   writeFileSync(join(root, "engagements", ".active"), "")
   expect(run(["curl", "--target", "api.acme.io", "--"]).code).toBe(3)

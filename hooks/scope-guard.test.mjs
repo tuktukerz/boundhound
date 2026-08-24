@@ -18,8 +18,8 @@ test("non-Bash tool -> allow (not our concern)", () => {
 test("Bash direct curl -> deny", () => {
   expect(decideFromEvent({ tool_name: "Bash", tool_input: { command: "curl https://evil.com" } }).hookSpecificOutput.permissionDecision).toBe("deny")
 })
-test("Bash via omop-exec -> allow", () => {
-  expect(decideFromEvent({ tool_name: "Bash", tool_input: { command: "omop-exec curl --target x" } }).hookSpecificOutput.permissionDecision).toBe("allow")
+test("Bash via bh-exec -> allow", () => {
+  expect(decideFromEvent({ tool_name: "Bash", tool_input: { command: "bh-exec curl --target x" } }).hookSpecificOutput.permissionDecision).toBe("allow")
 })
 test("deny result carries a reason string", () => {
   const out = decideFromEvent({ tool_name: "Bash", tool_input: { command: "bash -c \"curl evil.com\"" } })
@@ -41,8 +41,8 @@ test("cli: direct curl -> deny + exit 2", () => {
   expect(r.status).toBe(2)
   expect(r.stdout).toContain('"permissionDecision":"deny"')
 })
-test("cli: omop-exec -> allow + exit 0", () => {
-  const r = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "omop-exec curl --target x" } }))
+test("cli: bh-exec -> allow + exit 0", () => {
+  const r = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "bh-exec curl --target x" } }))
   expect(r.status).toBe(0)
   expect(r.stdout).toContain('"permissionDecision":"allow"')
 })

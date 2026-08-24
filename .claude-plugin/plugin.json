@@ -1,0 +1,9 @@
+{
+  "name": "boundhound",
+  "description": "Autonomous pentest agent with enforced, deny-by-default scope safety. Phase 0: safety foundation.",
+  "version": "0.1.0",
+  "author": { "name": "tuktukerz" },
+  "skills": "./.claude/skills/",
+  "commands": "./.claude/commands/",
+  "hooks": "./hooks/hooks.json"
+}

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omop-cc",
+      "name": "boundhound",
       "dependencies": {
         "yaml": "^2.5.0",
       },

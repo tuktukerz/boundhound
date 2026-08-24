@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# bin/bh-container
+set -euo pipefail
+action="${1:-}"; name="${2:-default}"; cname="bh-${name}"
+case "$action" in
+  up)
+    docker image inspect bh:base >/dev/null 2>&1 || \
+      docker build -t bh:base "$(dirname "$0")/../docker"
+    docker inspect "$cname" >/dev/null 2>&1 || \
+      docker run -d --name "$cname" bh:base >/dev/null
+    echo "container up: $cname" ;;
+  down) docker rm -f "$cname" >/dev/null 2>&1 || true; echo "down: $cname" ;;
+  status) docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || echo "absent" ;;
+  *) echo "usage: bh-container up|down|status <name>"; exit 1 ;;
+esac

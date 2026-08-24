@@ -1,0 +1,7 @@
+{
+  "name": "tuktukerz-marketplace",
+  "owner": { "name": "tuktukerz" },
+  "plugins": [
+    { "name": "boundhound", "source": "./", "description": "Deny-by-default pentest agent safety foundation." }
+  ]
+}
