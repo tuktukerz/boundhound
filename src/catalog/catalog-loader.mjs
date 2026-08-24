@@ -9,6 +9,13 @@ function validateEntry(e) {
     if (e[k] == null) throw new CatalogError(`tool missing '${k}': ${JSON.stringify(e).slice(0, 80)}`)
   }
   if (!e.command.base) throw new CatalogError(`tool '${e.tools_name}' missing command.base`)
+  for (const f of e.command.flags ?? []) {
+    if (f.takes_value === true && !f.value_pattern) {
+      throw new CatalogError(
+        `tool '${e.tools_name}' flag '${f.name}' has takes_value:true but no value_pattern (fail-closed)`,
+      )
+    }
+  }
 }
 
 export function loadCatalog(path, rawOverride) {
