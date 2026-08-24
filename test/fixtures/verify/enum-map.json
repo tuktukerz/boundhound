@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-08-24T00:00:00.000Z",
+  "content": [
+    { "url": "http://acme.io/admin", "path": "admin", "status": 200, "length": 1234, "words": 42, "host": "acme.io" }
+  ],
+  "findings": [
+    {
+      "template_id": "tech-detect-nginx",
+      "name": "Nginx Detect",
+      "severity": "info",
+      "host": "http://acme.io",
+      "matched_at": "http://acme.io/",
+      "type": "http"
+    },
+    {
+      "template_id": "exposed-panel-admin",
+      "name": "Exposed Admin Panel",
+      "severity": "medium",
+      "host": "http://acme.io",
+      "matched_at": "http://acme.io/admin",
+      "type": "http"
+    }
+  ],
+  "by_severity": { "info": 1, "low": 0, "medium": 1, "high": 0, "critical": 0 }
+}

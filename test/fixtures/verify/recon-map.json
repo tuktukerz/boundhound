@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-08-24T00:00:00.000Z",
+  "subdomains": ["www.acme.io", "api.acme.io"],
+  "http_services": [
+    { "url": "http://acme.io", "host": "acme.io", "status_code": 200, "title": "Acme Home", "tech": ["nginx"] }
+  ],
+  "hosts": [
+    {
+      "host": "acme.io",
+      "ports": [
+        { "port": 80, "proto": "tcp", "state": "open", "service": "http" },
+        { "port": 22, "proto": "tcp", "state": "open", "service": "ssh" }
+      ]
+    }
+  ]
+}
