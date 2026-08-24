@@ -1,8 +1,6 @@
 # Boundhound
 
-**Autonomous pentest agent, built natively on Claude Code.**
-
-> Not a fork. OmOP ([`zakirkun/oh-my-open-pentest`](https://github.com/zakirkun/oh-my-open-pentest)) is used as a skill mine and pattern reference — the orchestrator, safety layer, and integration are built from scratch on top of Claude Code primitives (skills, subagents, hooks).
+**A pentest agent for Claude Code with enforced, deny-by-default scope safety.**
 
 ---
 
@@ -105,7 +103,7 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   plugin.json              plugin manifest (skills/commands/hooks entry points)
   marketplace.json         self-hosted marketplace so the repo is /plugin-installable
 .claude/
-  skills/pentest-mode/     active skill (harvested from OmOP, tuned to our system)
+  skills/pentest-mode/     active skill (engagement mode + scope selector)
   commands/                /engagement, /mode
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
@@ -119,11 +117,11 @@ src/
   paths.mjs                code root vs data root resolution (plugin vs local-project)
   scope/                   parser + matcher (deny-by-default) + fail-closed resolver
   safety/                  blocks destructive/DoS actions
-  catalog/                 tools-catalog.json loader (ToolEntry schema, OmOP-style)
+  catalog/                 tools-catalog.json loader (ToolEntry schema)
   guard/                   command classification, anti-bypass
   audit/                   JSONL audit log
 docker/Dockerfile          minimal image — bridge tool only
-skills-library/            archived OmOP skills (reference, not yet active)
+skills-library/            authored skill library (promoted to active per phase)
 docs/
   ARCHITECTURE.md          big-picture map & 8 phases
   specs/, plans/           spec & implementation plan per phase
@@ -132,7 +130,7 @@ docs/
 ## Design principles
 
 1. **Safety before capability.** Every new capability phase (recon, exploit, etc.) is built on a foundation that has already passed its tests — not the other way around.
-2. **Harvest, don't fork.** OmOP's skills (250 `SKILL.md` files) are taken as raw material, kept in `skills-library/`, and promoted to active skills one at a time while being tuned — not imported wholesale.
+2. **Skills are authored, not imported.** Each active skill is written for Boundhound's own config and enforcement model, and promoted one phase at a time alongside the tools it orchestrates — never shipped ahead of the safety layer that bounds it.
 3. **Enforcement, not instruction.** When something must hold true, it's enforced by code/hooks — not just written into agent instructions.
 4. **Every task = TDD + adversarial review.** Built via subagent-driven development: each module is written test-first, reviewed by an independent subagent, and every finding (including real bugs — a guard bypass, a fail-open hook, a dead `import.meta.main` check on Node) is closed with a regression test before moving on.
 
