@@ -28,8 +28,16 @@ export function createEngagement(name, { rootDir, codeDir, dataDir, containerUp 
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
 if (isMain) {
-  const name = process.argv[2]
-  if (!name) { process.stderr.write("usage: omop-engagement <name>\n"); process.exit(1) }
-  const { path } = createEngagement(name, {})
+  // Optional "--data-dir <path>" pair, same rationale as omop-exec.mjs:
+  // ${CLAUDE_PLUGIN_DATA} is only exported as a real env var to hook/MCP/LSP
+  // subprocesses, not to the agent's Bash tool session, so plugin-mode
+  // invocations must pass the (content-substituted) data dir explicitly.
+  const argv = process.argv.slice(2)
+  const ddi = argv.indexOf("--data-dir")
+  const dataDir = ddi >= 0 ? argv[ddi + 1] : null
+  const rest = ddi >= 0 ? [...argv.slice(0, ddi), ...argv.slice(ddi + 2)] : argv
+  const name = rest[0]
+  if (!name) { process.stderr.write("usage: omop-engagement <name> [--data-dir <path>]\n"); process.exit(1) }
+  const { path } = createEngagement(name, dataDir ? { dataDir } : {})
   process.stdout.write(`engagement ready: ${path}\nedit scope.yaml, then run tools via omop-exec.\n`)
 }

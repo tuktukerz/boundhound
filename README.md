@@ -62,7 +62,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 106 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 108 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Install as a Claude Code plugin
@@ -74,14 +74,14 @@ bun test   # 106 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 
 Once installed, the **scope-guard hook enforces from any project directory** — you no longer need to be inside this repo checkout for the safety layer to be active. This is a hard guarantee: Claude Code exports `${CLAUDE_PLUGIN_ROOT}` directly to the hook's subprocess environment, and it's proven by `test/plugin-e2e.test.mjs`, which runs the hook from a foreign cwd with nothing pointing at this repo and confirms the DENY + audit trail still land correctly.
 
-`/engagement` and `/mode` are wired the same way — their instructions invoke `node "${CLAUDE_PLUGIN_ROOT}/bin/omop-engagement.mjs" ...` rather than a bare relative path — but that convenience path depends on Claude Code resolving the placeholder inline in skill/command content and the agent following the written instruction, which is a documented mechanism but not the same kind of hard runtime guarantee the hook has. See **Known limitations** below.
+`/engagement` and `/mode` are wired the same way — their instructions invoke `node "${CLAUDE_PLUGIN_ROOT}/bin/omop-engagement.mjs" ... --data-dir "${CLAUDE_PLUGIN_DATA}"` rather than a bare relative path — but that convenience path depends on Claude Code resolving both placeholders inline in skill/command content and the agent following the written instruction, which is a documented mechanism but not the same kind of hard runtime guarantee the hook has. See **Known limitations** below.
 
-Engagement state (scope files, `.active`, audit logs) lives under the plugin's own data directory (`${CLAUDE_PLUGIN_DATA}`), so it persists across plugin updates instead of being wiped when the plugin's code is refreshed.
+Engagement state (scope files, `.active`, audit logs) lives under the plugin's own data directory (`${CLAUDE_PLUGIN_DATA}`), so it persists across plugin updates instead of being wiped when the plugin's code is refreshed. The CLI (`omop-exec.mjs` / `omop-engagement.mjs`) receives that path via an explicit `--data-dir "${CLAUDE_PLUGIN_DATA}"` argument, content-substituted the same way `${CLAUDE_PLUGIN_ROOT}` already is in the script path — **not** by reading `CLAUDE_PLUGIN_DATA` as an environment variable at runtime. That distinction matters: Claude Code exports `CLAUDE_PLUGIN_DATA` as a real env var only to hook/MCP/LSP subprocesses, not to the agent's Bash tool session, so a CLI process spawned via Bash never sees it in its own `process.env` — without `--data-dir`, `dataRoot()` would silently fall back to the current working directory instead. Passing it explicitly as a CLI argument is what makes the CLI's state and audit log land in the same directory the hook (which does get the env var) already uses — see `test/plugin-cli-data-dir.test.mjs`.
 
 ## Known limitations
 
 - **One active engagement per installation.** Engagement state — including the single `.active` pointer file — lives under one shared `${CLAUDE_PLUGIN_DATA}` directory for the whole plugin installation, not per-project. Treat only one engagement as active at a time. Running different engagements concurrently from different project directories against the same installed plugin is **not yet supported**: they would share `.active` and could misattribute the audit trail (e.g. a tool run kicked off from project B could get logged against project A's engagement). This is a known gap for future work, not a safety bug — the deny-by-default/fail-closed guarantees still hold for whichever engagement is actually active.
-- **`/engagement` and `/mode` are agent-instruction-dependent, not hook-enforced.** They rely on the agent following the `${CLAUDE_PLUGIN_ROOT}`-qualified invocation written into the `pentest-mode` skill and command files (see that skill's "Invoking the scripts" section). The scope-guard hook has no such dependency — it is registered directly with Claude Code and fires unconditionally.
+- **`/engagement` and `/mode` are agent-instruction-dependent, not hook-enforced.** They rely on the agent following the `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_PLUGIN_DATA}`-qualified invocation written into the `pentest-mode` skill and command files (see that skill's "Invoking the scripts" section). The scope-guard hook has no such dependency — it is registered directly with Claude Code and fires unconditionally.
 
 ## Run from a clone (dev mode)
 
@@ -89,12 +89,14 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 106 pass / 1 skip
+bun test                        # 108 pass / 1 skip
 
 bin/omop-container up smoke     # start the tool container
 node bin/omop-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
 node bin/omop-exec.mjs curl --target api.acme.io -- -I   # run a tool through the choke point
 ```
+
+In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_PROJECT_DIR`/cwd (see `dataRoot()` in `src/paths.mjs`). `--data-dir <path>` is accepted by both scripts in any mode and, when passed, always wins over the env-var fallback.
 
 ## Structure
 
