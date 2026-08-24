@@ -1,4 +1,4 @@
-// bin/omop-exec.mjs
+// bin/bh-exec.mjs
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -49,7 +49,7 @@ export function runExec(argv, { rootDir, codeDir, dataDir, now, exec } = {}) {
   // The real runner needs the per-engagement container name, which is only
   // known once cfgName has been resolved above — build it here so the
   // closure never reads cfgName before it exists.
-  const runner = exec ?? ((cmdArray) => dockerExec(`omop-${cfgName}`, cmdArray))
+  const runner = exec ?? ((cmdArray) => dockerExec(`bh-${cfgName}`, cmdArray))
 
   const { tool, target, extraArgs } = parse(argv)
   const auditPath = join(dDir, "engagements", cfgName, "audit.log")

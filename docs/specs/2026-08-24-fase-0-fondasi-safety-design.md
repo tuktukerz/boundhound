@@ -58,8 +58,8 @@ boundhound/
 │   ├── commands/              # /engagement, /mode  (format OmOP)
 │   └── skills/                # skill AKTIF (Fase 0: hanya pentest-mode)
 ├── bin/
-│   ├── omop-exec              # jembatan: bangun cmd dari katalog → docker exec
-│   └── omop-engagement        # scaffold engagement + set aktif + container up
+│   ├── bh-exec              # jembatan: bangun cmd dari katalog → docker exec
+│   └── bh-engagement        # scaffold engagement + set aktif + container up
 ├── hooks/
 │   └── scope-guard.mjs        # enforcement PreToolUse (deny-by-default)
 ├── src/
@@ -99,7 +99,7 @@ rate_limit: 10
 notes: "Prod. Jangan sentuh corp."
 ```
 
-Pencocokan (di hook & `omop-exec`): normalisasi target → cek `out_of_scope` (tolak) → cek `in_scope` (izin) → selain itu tolak.
+Pencocokan (di hook & `bh-exec`): normalisasi target → cek `out_of_scope` (tolak) → cek `in_scope` (izin) → selain itu tolak.
 
 ### 4.3 `tools-catalog.json` (adopsi schema OmOP)
 
@@ -115,23 +115,23 @@ Hook `PreToolUse` untuk tool **Bash**, didaftarkan di `.claude/settings.json`. L
 1. Muat `engagements/.active` → tak ada → **DENY (fail-closed)**.
 2. Muat `scope.yaml` → rusak → **DENY**.
 3. `scope_enforcement: none` → lolos (mis. CTF). `strict|moderate` → lanjut.
-4. Perintah diawali `omop-exec ` → percayakan pengecekan ke `omop-exec` (jalur sah).
-5. Perintah memuat binari jaringan langsung / `docker exec` bukan via `omop-exec` → **DENY** (cegah bypass).
+4. Perintah diawali `bh-exec ` → percayakan pengecekan ke `bh-exec` (jalur sah).
+5. Perintah memuat binari jaringan langsung / `docker exec` bukan via `bh-exec` → **DENY** (cegah bypass).
 6. Perintah non-jaringan (git/ls/cat/…) → lolos.
 
-`omop-exec` sendiri mengulang cek scope + terapkan `safety_constraints` sebelum `docker exec` (defense-in-depth).
+`bh-exec` sendiri mengulang cek scope + terapkan `safety_constraints` sebelum `docker exec` (defense-in-depth).
 
 ### 4.6 Docker bridge
 
 - `docker/Dockerfile`: base `debian:stable-slim` + hanya alat uji-jembatan (`curl`, `iputils-ping`, `dnsutils`). **Tanpa tool pentest.**
-- `bin/omop-exec <toolspec> --target <t>`: cek scope+safety → `docker exec omop-<engagement> <cmd>` (cmd dari command-builder).
-- Container persisten per-engagement (dinaikkan oleh `omop-engagement`).
+- `bin/bh-exec <toolspec> --target <t>`: cek scope+safety → `docker exec bh-<engagement> <cmd>` (cmd dari command-builder).
+- Container persisten per-engagement (dinaikkan oleh `bh-engagement`).
 
 ### 4.7 Audit log
-`omop-exec` append JSON-per-baris ke `engagements/<t>/audit.log`: `ts, target, tool, decision, reason, authorization`. Timestamp diambil skrip (bukan agent).
+`bh-exec` append JSON-per-baris ke `engagements/<t>/audit.log`: `ts, target, tool, decision, reason, authorization`. Timestamp diambil skrip (bukan agent).
 
 ### 4.8 Commands (format OmOP)
-- `.claude/commands/engagement.md` → load skill `pentest-mode`, tuntun user isi `scope.yaml`, panggil `omop-engagement`.
+- `.claude/commands/engagement.md` → load skill `pentest-mode`, tuntun user isi `scope.yaml`, panggil `bh-engagement`.
 - `.claude/commands/mode.md` → set `mode` + `scope_enforcement` di engagement aktif.
 - Skill aktif Fase 0: **hanya `pentest-mode`** (dipanen dari OmOP, di-tuning ke config kita).
 
@@ -143,11 +143,11 @@ Semua harus hijau (tes otomatis, target uji = domain contoh/loopback, tanpa jari
 
 | # | Tes | Harapan |
 |---|---|---|
-| T1 | `omop-exec curl --target api.acme.io` (in_scope) | ALLOW, ter-exec di container, audit ALLOW |
-| T2 | `omop-exec curl --target evil.com` (luar scope) | DENY, audit `deny-by-default` |
-| T3 | `omop-exec curl --target blog.acme.com` (out_of_scope) | DENY (pengecualian menang) |
+| T1 | `bh-exec curl --target api.acme.io` (in_scope) | ALLOW, ter-exec di container, audit ALLOW |
+| T2 | `bh-exec curl --target evil.com` (luar scope) | DENY, audit `deny-by-default` |
+| T3 | `bh-exec curl --target blog.acme.com` (out_of_scope) | DENY (pengecualian menang) |
 | T4 | Agent `curl https://evil.com` langsung (bypass) | Hook DENY, tak jalan |
-| T5 | Agent `docker exec omop-acme curl evil.com` (bypass) | Hook DENY |
+| T5 | Agent `docker exec bh-acme curl evil.com` (bypass) | Hook DENY |
 | T6 | Tanpa engagement aktif | Fail-closed, DENY |
 | T7 | `scope.yaml` rusak/hilang | Fail-closed, DENY |
 | T8 | `safety_constraints.block_destructive` aktif + aksi destruktif | DENY; kalau `none`/lab → ALLOW |
@@ -169,7 +169,7 @@ Semua harus hijau (tes otomatis, target uji = domain contoh/loopback, tanpa jari
 ## 7. Risiko & Mitigasi
 | Risiko | Mitigasi |
 |---|---|
-| Agent temukan bypass tak terduga | Choke point `omop-exec` + hook deny-by-default seluruh binari jaringan + audit |
+| Agent temukan bypass tak terduga | Choke point `bh-exec` + hook deny-by-default seluruh binari jaringan + audit |
 | `--target` menyesatkan (arg nembak host lain) | Diterima sebagai batas Fase 0 (jaminan = no-bypass + target jujur); egress-lock jaringan = hardening Fase 6/7 bila diperlukan |
 | Wildcard scope kelewat longgar | Validasi `scope.yaml`: tolak wildcard TLD-level |
 | Fail-open karena bug | Semua jalur error → fail-closed (DENY) |

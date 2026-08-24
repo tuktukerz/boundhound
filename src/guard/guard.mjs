@@ -1,8 +1,8 @@
 // Guard — best-effort defense-in-depth filter for the PreToolUse hook.
 // It classifies a bash command string and denies attempts to run network
-// tools directly (bypassing the omop-exec choke point). A static string
+// tools directly (bypassing the bh-exec choke point). A static string
 // classifier can NEVER be hermetic against a determined caller; the
-// authoritative boundaries are (1) omop-exec's scope check and (2) the
+// authoritative boundaries are (1) bh-exec's scope check and (2) the
 // container sandbox. Hermetic network egress-lock is deferred (see spec
 // docs/specs Fase 6/7 hardening). This filter closes the cheap, common
 // bypasses and raises the bar.
@@ -24,9 +24,9 @@ function stripQuotes(t) {
   return t.replace(/^['"]+/, "").replace(/['"]+$/, "")
 }
 
-function isOmopExec(token) {
+function isBhExec(token) {
   const t = stripQuotes(token)
-  return t === "omop-exec" || /(^|\/)omop-exec(\.mjs)?$/.test(t)
+  return t === "bh-exec" || /(^|\/)bh-exec(\.mjs)?$/.test(t)
 }
 
 // Strips leading grouping/negation characters left over from subshell or
@@ -60,16 +60,16 @@ export function classifyCommand(cmd) {
     }
     if (!tokens.length) continue
     const headRaw = tokens[0]
-    if (isOmopExec(headRaw)) continue // sanctioned path
+    if (isBhExec(headRaw)) continue // sanctioned path
     const base = stripQuotes(headRaw).split("/").pop().toLowerCase()
     if (base === "docker" && (tokens[1] === "exec" || tokens[1] === "run")) {
-      return { decision: "DENY", reason: `docker ${tokens[1]} bypass (use omop-exec)` }
+      return { decision: "DENY", reason: `docker ${tokens[1]} bypass (use bh-exec)` }
     }
     if (INTERPRETERS.includes(base) && tokens.slice(1).some((t) => t === "-c" || t === "-e" || t === "-ce")) {
-      return { decision: "DENY", reason: `interpreter inline code '${base}' (use omop-exec)` }
+      return { decision: "DENY", reason: `interpreter inline code '${base}' (use bh-exec)` }
     }
     if (NETWORK_BINS.includes(base)) {
-      return { decision: "DENY", reason: `direct network tool '${base}' (use omop-exec)` }
+      return { decision: "DENY", reason: `direct network tool '${base}' (use bh-exec)` }
     }
   }
   return { decision: "ALLOW", reason: "non-network-or-sanctioned" }

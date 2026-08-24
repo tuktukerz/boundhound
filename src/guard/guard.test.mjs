@@ -1,12 +1,12 @@
 import { test, expect } from "bun:test"
 import { classifyCommand } from "./guard.mjs"
 
-test("allows commands via omop-exec", () => {
-  expect(classifyCommand("omop-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
+test("allows commands via bh-exec", () => {
+  expect(classifyCommand("bh-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
 })
 
-test("allows omop-exec by absolute path", () => {
-  expect(classifyCommand("/repo/bin/omop-exec.mjs curl --target x").decision).toBe("ALLOW")
+test("allows bh-exec by absolute path", () => {
+  expect(classifyCommand("/repo/bin/bh-exec.mjs curl --target x").decision).toBe("ALLOW")
 })
 
 test("denies direct network binary", () => {
@@ -15,8 +15,8 @@ test("denies direct network binary", () => {
   expect(classifyCommand("wget http://x").decision).toBe("DENY")
 })
 
-test("denies docker exec that bypasses omop-exec", () => {
-  expect(classifyCommand("docker exec omop-acme curl evil.com").decision).toBe("DENY")
+test("denies docker exec that bypasses bh-exec", () => {
+  expect(classifyCommand("docker exec bh-acme curl evil.com").decision).toBe("DENY")
 })
 
 test("allows benign non-network commands", () => {
@@ -65,7 +65,7 @@ test("case-insensitive binary match", () => {
 test("still allows legit commands mentioning a tool name in args", () => {
   expect(classifyCommand('git commit -m "fix curl bug"').decision).toBe("ALLOW")
   expect(classifyCommand("git status").decision).toBe("ALLOW")
-  expect(classifyCommand("omop-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
+  expect(classifyCommand("bh-exec curl --target api.acme.io -- -I").decision).toBe("ALLOW")
 })
 
 test("denies common wrapper commands hiding a network tool", () => {

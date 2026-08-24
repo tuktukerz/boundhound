@@ -2,11 +2,11 @@ import { test, expect, beforeEach } from "bun:test"
 import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createEngagement } from "./omop-engagement.mjs"
+import { createEngagement } from "./bh-engagement.mjs"
 
 let root, upCalls
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "omop-eng-"))
+  root = mkdtempSync(join(tmpdir(), "bh-eng-"))
   mkdirSync(join(root, "engagements", "templates"), { recursive: true })
   writeFileSync(join(root, "engagements", "templates", "scope.yaml"), "engagement: REPLACE_ME\n")
   upCalls = []
@@ -31,10 +31,10 @@ test("does not overwrite an existing scope.yaml", () => {
 // the templates dir (no engagements/ at all) to prove the read never
 // touches dataDir.
 test("P4: split codeDir/dataDir -> template from codeDir, engagement written to dataDir", () => {
-  const codeDir = mkdtempSync(join(tmpdir(), "omop-eng-code-"))
+  const codeDir = mkdtempSync(join(tmpdir(), "bh-eng-code-"))
   mkdirSync(join(codeDir, "engagements", "templates"), { recursive: true })
   writeFileSync(join(codeDir, "engagements", "templates", "scope.yaml"), "engagement: REPLACE_ME\nfrom: codeDir\n")
-  const dataDir = mkdtempSync(join(tmpdir(), "omop-eng-data-"))
+  const dataDir = mkdtempSync(join(tmpdir(), "bh-eng-data-"))
   const upCalls = []
 
   const { path } = createEngagement("acme", { codeDir, dataDir, containerUp: (n) => upCalls.push(n) })
@@ -47,30 +47,30 @@ test("P4: split codeDir/dataDir -> template from codeDir, engagement written to 
 })
 
 // Fix 1 regression: the default containerUp (no containerUp override) used
-// to shell out to a bare relative path ("bin/omop-container"), which Node
+// to shell out to a bare relative path ("bin/bh-container"), which Node
 // resolves against process.cwd() — broken from any dir that isn't the repo
 // checkout. It must instead be built from cDir (join(cDir, "bin",
-// "omop-container")), the same code-root resolution runExec already uses
+// "bh-container")), the same code-root resolution runExec already uses
 // for tools-catalog.json. Proven here with a real (fake) executable and a
 // cwd deliberately different from cDir, and NOT the process's real cwd at
 // test-run time — so a regression to the bare relative path would either
 // fail to find the binary (ENOENT) or invoke the wrong one, not silently
-// pass. No real Docker/omop-container involved.
+// pass. No real Docker/bh-container involved.
 test("Fix 1: default containerUp resolves the binary from cDir, not cwd", () => {
-  const codeDir = mkdtempSync(join(tmpdir(), "omop-eng-code-"))
+  const codeDir = mkdtempSync(join(tmpdir(), "bh-eng-code-"))
   mkdirSync(join(codeDir, "engagements", "templates"), { recursive: true })
   writeFileSync(join(codeDir, "engagements", "templates", "scope.yaml"), "engagement: REPLACE_ME\n")
   mkdirSync(join(codeDir, "bin"), { recursive: true })
 
   const marker = join(codeDir, "bin", "invoked.txt")
-  const fakeContainerBin = join(codeDir, "bin", "omop-container")
+  const fakeContainerBin = join(codeDir, "bin", "bh-container")
   writeFileSync(fakeContainerBin, `#!/usr/bin/env bash\necho "$@" > "${marker}"\n`)
   chmodSync(fakeContainerBin, 0o755)
 
-  const dataDir = mkdtempSync(join(tmpdir(), "omop-eng-data-"))
+  const dataDir = mkdtempSync(join(tmpdir(), "bh-eng-data-"))
   // A foreign cwd, unrelated to codeDir/dataDir, proves resolution does not
   // depend on process.cwd() (which is what the bare-relative-path bug did).
-  const foreignCwd = mkdtempSync(join(tmpdir(), "omop-eng-foreign-cwd-"))
+  const foreignCwd = mkdtempSync(join(tmpdir(), "bh-eng-foreign-cwd-"))
 
   const originalCwd = process.cwd()
   process.chdir(foreignCwd)

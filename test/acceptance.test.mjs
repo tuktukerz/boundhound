@@ -8,7 +8,7 @@
 // the spec says deny).
 //
 // T10 (/engagement + /mode + container lifecycle) and T12 (catalog schema
-// validation) are exercised by the Task 12 (bin/omop-engagement.test.mjs),
+// validation) are exercised by the Task 12 (bin/bh-engagement.test.mjs),
 // Task 6 (src/catalog/catalog-loader.test.mjs) unit suites, and the Task 13
 // docker smoke (docker/bridge-smoke.test.mjs, self-skips without a running
 // container) rather than here, since they are not reachable purely through
@@ -17,7 +17,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runExec } from "../bin/omop-exec.mjs"
+import { runExec } from "../bin/bh-exec.mjs"
 import { classifyCommand } from "../src/guard/guard.mjs"
 
 let root, calls
@@ -40,7 +40,7 @@ function catalog() {
     category: "utility", command: { base: "curl", flags: [{ name: "-sS" }, { name: "-I" }], positional: [{ name: "url", required: true }] }, phase: ["utility"] }] })
 }
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "omop-acc-"))
+  root = mkdtempSync(join(tmpdir(), "bh-acc-"))
   mkdirSync(join(root, "engagements", "acme"), { recursive: true })
   writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
   writeFileSync(join(root, "engagements", ".active"), "acme")
@@ -84,7 +84,7 @@ test("T4 direct curl bypass -> guard DENY", () => {
 })
 
 test("T5 docker exec bypass -> guard DENY", () => {
-  const r = classifyCommand("docker exec omop-acme curl evil.com")
+  const r = classifyCommand("docker exec bh-acme curl evil.com")
   expect(r.decision).toBe("DENY")
   expect(r.reason).toMatch(/docker exec bypass/)
 })

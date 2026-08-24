@@ -4,7 +4,7 @@
 // correctly when the agent invokes the CLI. ${CLAUDE_PLUGIN_DATA} is only
 // exported as a real env var to hook/MCP/LSP subprocesses (proven by
 // test/plugin-e2e.test.mjs for the hook) — NOT to the agent's Bash tool
-// session. So `node "${CLAUDE_PLUGIN_ROOT}/bin/omop-exec.mjs" ...`, run the
+// session. So `node "${CLAUDE_PLUGIN_ROOT}/bin/bh-exec.mjs" ...`, run the
 // way an agent actually runs it (via Bash), never saw CLAUDE_PLUGIN_DATA in
 // its own process env, and dataRoot() silently fell through to cwd instead
 // of the plugin's data dir.
@@ -13,7 +13,7 @@
 // "Skill and agent content" row) ${CLAUDE_PLUGIN_DATA} value through
 // explicitly as a `--data-dir <path>` CLI argument. This is a REAL
 // subprocess E2E (not a call into the exported runExec()) because the new
-// code under test is the argv-parsing in omop-exec.mjs's `isMain` block,
+// code under test is the argv-parsing in bh-exec.mjs's `isMain` block,
 // which only runs in the actual CLI entrypoint — see test/plugin-e2e.test.mjs
 // for the same real-subprocess pattern applied to the hook.
 import { test, expect, beforeEach, afterEach } from "bun:test"
@@ -24,7 +24,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url))
-const execPath = join(repoRoot, "bin", "omop-exec.mjs")
+const execPath = join(repoRoot, "bin", "bh-exec.mjs")
 
 // out_of_scope target -> deterministic DENY, no docker/exec involved at all
 // (the audit line is appended before the runner ever gets called), so these

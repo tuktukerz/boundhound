@@ -1,16 +1,16 @@
-// bin/omop-exec.test.mjs
+// bin/bh-exec.test.mjs
 import { test, expect, beforeEach } from "bun:test"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runExec } from "./omop-exec.mjs"
+import { runExec } from "./bh-exec.mjs"
 
 let root, calls
 const now = () => "2026-08-24T00:00:00Z"
 const exec = (arr) => { calls.push(arr); return 0 }
 
 function setup(scope) {
-  root = mkdtempSync(join(tmpdir(), "omop-exec-"))
+  root = mkdtempSync(join(tmpdir(), "bh-exec-"))
   mkdirSync(join(root, "engagements", "acme"), { recursive: true })
   writeFileSync(join(root, "engagements", "acme", "scope.yaml"), scope)
   writeFileSync(join(root, "engagements", ".active"), "acme")
@@ -80,12 +80,12 @@ test("declared flags still work normally", () => {
 // P3: split codeDir/dataDir must behave identically to the single-rootDir
 // case above — same ALLOW/DENY decisions, audit still lands under dataDir.
 function setupSplit(scope) {
-  const codeDir = mkdtempSync(join(tmpdir(), "omop-exec-code-"))
+  const codeDir = mkdtempSync(join(tmpdir(), "bh-exec-code-"))
   writeFileSync(join(codeDir, "tools-catalog.json"), JSON.stringify({
     version: "0", tools: [{ tools_name: "curl", description: "d", category: "utility",
       command: { base: "curl", flags: [{ name: "-sS" }, { name: "-I" }], positional: [{ name: "url", required: true }] }, phase: ["utility"] }]
   }))
-  const dataDir = mkdtempSync(join(tmpdir(), "omop-exec-data-"))
+  const dataDir = mkdtempSync(join(tmpdir(), "bh-exec-data-"))
   mkdirSync(join(dataDir, "engagements", "acme"), { recursive: true })
   writeFileSync(join(dataDir, "engagements", "acme", "scope.yaml"), scope)
   writeFileSync(join(dataDir, "engagements", ".active"), "acme")
