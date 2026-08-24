@@ -27,8 +27,10 @@ Dua metrik yang tidak bisa ditawar: **(1)** output = report yang beneran kepakai
 
 | Konsep pentest agent | Diwujudkan pakai |
 |---|---|
-| Skill playbook (recon, xss, sqli, dst) | `.claude/skills/*/SKILL.md` (aktif) + `skills-library/` (arsip 250) |
-| Eksekusi tool (nmap, nuclei, sqlmap) | Wrapper tunggal `omop-run` → `docker exec` ke container Linux |
+| Skill playbook (recon, xss, sqli, dst) | Frontmatter OmOP + `.claude/skills/*/SKILL.md` (aktif) + `skills-library/` (arsip 250) |
+| Registry tool | `tools-catalog.json` (schema `ToolEntry` OmOP) + `command-builder` |
+| Eksekusi tool (nmap, nuclei, sqlmap) | `bin/omop-exec` → `docker exec` ke container Linux |
+| Tool via MCP (mis. Burp Suite) | MCP server native Claude Code (on-pattern; OmOP juga pakai MCP) — lihat §7 |
 | Orchestrator (recon→…→report) | Master skill yang menyetir **subagents** per fase |
 | `/engagement`, `/fullscan` | `.claude/commands/*.md` |
 | Engagement mode | Skill / argumen command |
@@ -85,27 +87,37 @@ Tiap fase = milestone berdiri sendiri dengan siklus **spec → plan → implemen
 ```
 omop-cc/
 ├── .claude/
-│   ├── settings.json        # hook PreToolUse (scope-guard)
-│   ├── commands/            # /engagement, /fullscan, ...
+│   ├── settings.json        # daftarkan hook PreToolUse (scope-guard)
+│   ├── commands/            # /engagement, /mode, ... (format OmOP)
 │   └── skills/              # skill AKTIF (dipromosikan per-fase)
 ├── bin/
-│   ├── omop-run             # choke point: scope-check → safety → docker exec
-│   ├── omop-engagement      # scaffold engagement baru + set aktif
-│   └── omop-container        # lifecycle container (up/down/status)
+│   ├── omop-exec            # bangun cmd dari katalog → scope+safety → docker exec
+│   └── omop-engagement      # scaffold engagement + set aktif + container up
 ├── hooks/
-│   └── scope-guard.sh       # dipanggil settings.json; cegah bypass omop-run
-├── docker/
-│   └── Dockerfile           # base ramping; tool ditambah per-fase
+│   └── scope-guard.mjs      # enforcement PreToolUse; cegah bypass omop-exec
+├── src/
+│   ├── catalog/             # loader tools-catalog.json (pola OmOP)
+│   └── command-builder/     # bangun perintah dari ToolEntry.flags
+├── tools-catalog.json       # registry tool deklaratif (schema ToolEntry)
+├── docker/Dockerfile        # base ramping; tool ditambah per-fase
 ├── skills-library/          # arsip 250 skill OmOP (referensi, tidak di-load)
 ├── engagements/
 │   ├── .active              # pointer ke engagement aktif
 │   └── <target>/
-│       ├── scope.yaml       # in_scope / out_of_scope / rate_limit
+│       ├── scope.yaml       # engagement config: mode + scope + safety_constraints
 │       ├── audit.log        # chain-of-custody tiap perintah
 │       └── output/          # hasil per fase
 └── docs/
     ├── ARCHITECTURE.md      # dokumen ini
     └── specs/               # spec detail per fase
 ```
+
+## 7. Integrasi MCP (mis. Burp Suite)
+
+Claude Code mendukung MCP server native, dan OmOP juga dibangun di atas MCP — jadi menambah tool lewat MCP itu **on-pattern**. **Burp Suite** punya MCP server resmi yang cocok banget untuk web/bug-bounty (Proxy, Repeater, Scanner). Rencana penempatan: **Fase 2–3 (enum/exploit)**, BUKAN Fase 0.
+
+Catatan penting saat dipakai:
+- Butuh Burp jalan (Burp **Pro** untuk active scan; Community terbatas). Burp jalan di **host**, bukan di container tool.
+- **Safety:** hook scope-guard kita hanya melihat perintah Bash — dia **tidak** melihat tiap request yang dikirim Burp. Jadi scope untuk Burp **wajib diset juga di Target Scope Burp**; panggilan MCP Burp diperlakukan sebagai choke point terpisah.
 
 *(Di Fase 0 hanya sebagian yang dibangun — lihat spec Fase 0.)*

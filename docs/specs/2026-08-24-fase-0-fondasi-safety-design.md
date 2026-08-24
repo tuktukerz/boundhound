@@ -2,178 +2,174 @@
 
 **Tanggal:** 2026-08-24
 **Status:** draft, menunggu review
-**Prasyarat:** tidak ada (ini fase pertama)
-**Menghasilkan:** fondasi safety yang wajib lulus tes sebelum fase kemampuan apa pun dibangun.
+**Prasyarat:** tidak ada (fase pertama)
+**Prinsip pemandu:** **ikut pola repo rujukan (OmOP)**, tambahkan "teeth" di titik safety sebagai upgrade.
 
 ---
 
 ## 1. Tujuan & Non-Tujuan
 
 ### Tujuan
-Membangun **lapisan keamanan yang membuktikan** bahwa agent **tidak bisa** menyentuh target di luar scope — baik lewat jalur resmi maupun dengan menghindar. Plus infrastruktur pendukung minimum: container tool, audit log, dan cara memulai engagement.
+Membangun **kerangka repo bergaya OmOP** + **lapisan keamanan yang benar-benar dipaksa**: engagement config (mode + scope), katalog tool deklaratif, jembatan Docker, audit log, dan hook yang memblokir perintah ke luar scope. Semua mengikuti konvensi OmOP; bedanya, `scope_enforcement: strict` di sini **ditegakkan mesin**, bukan sekadar diminta ke agent.
 
 ### Non-Tujuan (TEGAS)
-- ❌ **Tidak ada kemampuan serang/recon apa pun.** Nol tool pentest (nmap/nuclei/dst). Itu Fase 1+.
-- ❌ Tidak ada orchestrator, tidak ada `/fullscan`, tidak ada skill dipromosikan.
-- ❌ Tidak ada mode detection, tidak ada report.
+- ❌ **Nol kemampuan serang/recon.** Tidak ada tool pentest nyata (nmap/nuclei/dst). Itu Fase 1+.
+- ❌ Tidak ada orchestrator/`fullscan`, tidak ada skill fase dipromosikan.
+- ❌ Tidak ada report, tidak ada mode-detection cerdas (cukup pemilihan mode manual dulu).
 
-> Fase 0 sukses kalau: kita bisa mulai engagement, container hidup, audit jalan, dan **terbukti secara tes** bahwa perintah ke target luar-scope diblokir — sementara belum ada satu pun senjata terpasang.
-
----
-
-## 2. Prinsip Desain
-
-1. **Deny-by-default.** Kalau target tidak cocok `in_scope` secara eksplisit → blokir. Ragu = blokir.
-2. **Fail-closed.** `scope.yaml` hilang/rusak/tak ada engagement aktif → blokir semua, jangan lolos.
-3. **Choke point tunggal.** Semua eksekusi tool jaringan lewat SATU pintu (`omop-run`). Satu tempat yang di-review, di-audit, di-tes.
-4. **Defense-in-depth.** `omop-run` melakukan pengecekan sebenarnya; **hook** mencegah agent menghindari `omop-run`. Dua lapis independen.
-5. **Auditable.** Tiap keputusan (izin/tolak) tercatat dengan timestamp, tool, target, alasan.
+> **DoD ringkas:** bisa `/engagement` + `/mode`, container hidup, audit jalan, dan **terbukti via tes** perintah ke luar scope diblokir — padahal belum ada satu senjata pun.
 
 ---
 
-## 3. Komponen (unit-unit terisolasi)
+## 2. Pola OmOP yang Diadopsi (jangan ngarang sendiri)
 
-Tiap unit: satu tujuan, antarmuka jelas, bisa dites sendiri.
+| Aspek | Pola OmOP yang kita ikuti |
+|---|---|
+| Skill | Frontmatter `name` / `description`(+`Triggers:`) / `version` / `phase` / `category` / `tools` / `tags`, body = resep bash konkret |
+| Nama skill fase | `pentest-mode`, `pentest-recon`, `pentest-enum`, `pentest-exploit`, `pentest-report`, `pentest-workflow` |
+| Tool | `tools-catalog.json` deklaratif (schema `ToolEntry`) + `command-builder` yang menyusun perintah dari flags |
+| Mode | `ModeConfig` (`scope_enforcement`, `tool_priority`, `skill_chain`, `parallelism`, `stealth`, `report_format`, `safety_constraints`) |
+| Command | File `.md`: frontmatter `description:` + `<command-instruction>` yang me-load skill + `<user-request>$ARGUMENTS</user-request>` |
+| Arsip skill | 250 SKILL.md OmOP disimpan mentah di `skills-library/`, dipromosikan per-fase |
 
-### 3.1 `scope.yaml` — deklarasi scope
+**Yang bukan pola OmOP & sengaja kita TAMBAH (ini "upgrade"-nya):**
+- Hook Claude Code `PreToolUse` yang **menegakkan** `scope_enforcement: strict` (deny-by-default). OmOP menyerahkannya ke kepatuhan agent; kita paksa di mesin.
+- Audit log chain-of-custody per engagement.
 
-Satu file per engagement. **Sumber kebenaran** untuk "apa yang boleh disentuh".
+---
+
+## 3. Prinsip Safety
+
+1. **Deny-by-default.** Target tak cocok `in_scope` eksplisit → blokir. Ragu → blokir.
+2. **Fail-closed.** Config engagement hilang/rusak/tak aktif → blokir semua.
+3. **Enforcement, bukan imbauan.** `scope_enforcement: strict` di-*enforce* hook, bukan cuma teks prompt.
+4. **Auditable.** Tiap keputusan (ALLOW/DENY) tercatat: ts, tool, target, alasan, authorization.
+
+---
+
+## 4. Komponen Fase 0
+
+### 4.1 Struktur repo (gaya OmOP)
+
+```
+omop-cc/
+├── .claude/
+│   ├── settings.json          # daftarkan hook PreToolUse
+│   ├── commands/              # /engagement, /mode  (format OmOP)
+│   └── skills/                # skill AKTIF (Fase 0: hanya pentest-mode)
+├── bin/
+│   ├── omop-exec              # jembatan: bangun cmd dari katalog → docker exec
+│   └── omop-engagement        # scaffold engagement + set aktif + container up
+├── hooks/
+│   └── scope-guard.mjs        # enforcement PreToolUse (deny-by-default)
+├── src/
+│   ├── catalog/               # loader tools-catalog.json (adopsi pola OmOP)
+│   └── command-builder/       # bangun perintah dari ToolEntry.flags
+├── tools-catalog.json         # registry tool deklaratif (Fase 0: 1 tool uji)
+├── skills-library/            # arsip 250 SKILL.md OmOP (referensi)
+├── engagements/
+│   ├── .active                # pointer engagement aktif
+│   └── <name>/
+│       ├── scope.yaml         # engagement config (lihat 4.2)
+│       ├── audit.log
+│       └── output/
+├── docker/Dockerfile          # base ramping; tool ditambah per-fase
+└── docs/
+```
+
+### 4.2 `scope.yaml` — engagement config (bentuk mengikuti `ModeConfig` OmOP)
+
+Satu file per engagement. Menggabungkan mode-config OmOP + daftar target (tambahan kita).
 
 ```yaml
-# engagements/<target>/scope.yaml
-engagement: acme-bugbounty          # nama/label
-authorization: "HackerOne #12345"   # bukti izin (wajib diisi, dicatat ke audit)
+engagement: acme-bugbounty
+authorization: "HackerOne #12345"      # wajib; dicatat ke audit
+mode: bug-bounty                        # auto|ctf|bug-bounty|red-team|blue-team|offensive|grey-hat
+scope_enforcement: strict               # strict|moderate|none  (OmOP)
 in_scope:
-  domains:
-    - "*.acme.com"                  # wildcard didukung
-    - "api.acme.io"
-  cidrs:
-    - "203.0.113.0/24"
-out_of_scope:                        # pengecualian eksplisit; menang atas in_scope
-  domains:
-    - "blog.acme.com"
-    - "*.corp.acme.com"
-  cidrs:
-    - "203.0.113.5/32"
-rate_limit: 10                       # req/detik (dipakai fase nanti; dicatat sekarang)
-safety_profile: default             # default | lab (lab membuka aksi destruktif)
-notes: "Prod. Jangan sentuh subdomain corp."
+  domains: ["*.acme.com", "api.acme.io"]
+  cidrs:   ["203.0.113.0/24"]
+out_of_scope:                           # menang atas in_scope
+  domains: ["blog.acme.com", "*.corp.acme.com"]
+  cidrs:   ["203.0.113.5/32"]
+safety_constraints:                     # OmOP SafetyConfig
+  block_destructive: true               # blok dump masif / os-shell / write
+  block_dos: true                       # blok intensitas bau DoS
+rate_limit: 10
+notes: "Prod. Jangan sentuh corp."
 ```
 
-**Aturan pencocokan (di `omop-run`):**
-1. Normalisasi target (URL → host; strip port/scheme).
-2. Kalau cocok `out_of_scope` → **TOLAK** (pengecualian menang).
-3. Kalau cocok `in_scope` (domain exact / wildcard / IP dalam CIDR) → **IZIN**.
-4. Selain itu → **TOLAK** (deny-by-default).
+Pencocokan (di hook & `omop-exec`): normalisasi target → cek `out_of_scope` (tolak) → cek `in_scope` (izin) → selain itu tolak.
 
-### 3.2 `bin/omop-run` — choke point eksekusi
+### 4.3 `tools-catalog.json` (adopsi schema OmOP)
 
-Satu-satunya jalan sah menjalankan tool. Antarmuka:
+Pakai schema `ToolEntry` OmOP apa adanya (`tools_name`, `category`, `command{base,flags,positional,pipes}`, `installation{linux/darwin/win32}`, `check_installed`, `skills_loader`, `phase[]`, `tags`, `requires_root`, `output_format[]`). **Fase 0** hanya memuat **satu tool uji tak berbahaya** (mis. `curl`) untuk membuktikan pipeline; tool nyata masuk per-fase.
 
-```
-omop-run --target <host|url|ip> -- <tool> [args...]
-```
+### 4.4 `command-builder` (adopsi pola OmOP)
 
-Alur:
-1. Baca `engagements/.active` → tak ada → **fail-closed** (exit 3).
-2. Muat & validasi `scope.yaml` → rusak → **fail-closed** (exit 3).
-3. Cek `--target` lawan scope (§3.1) → tolak → log + exit 2.
-4. Terapkan **safety profile** (§3.3) ke `<tool> args` → aksi terlarang → log + exit 2.
-5. Tulis baris audit (§3.4).
-6. Eksekusi: `docker exec <container-engagement> <tool> args`.
+Menyusun perintah final dari `ToolEntry.command` + flags. Fase 0 cukup versi minimal (cukup untuk tool uji); diperkaya di Fase 1 saat recon tool masuk.
 
-> Catatan: `--target` wajib eksplisit. Kita **tidak** menebak target dari parsing arg tool yang sembarangan — target dinyatakan terpisah supaya pengecekan deterministik.
+### 4.5 `hooks/scope-guard.mjs` — enforcement (upgrade utama)
 
-### 3.3 Safety Profile — blok aksi destruktif/DoS
+Hook `PreToolUse` untuk tool **Bash**, didaftarkan di `.claude/settings.json`. Logika:
+1. Muat `engagements/.active` → tak ada → **DENY (fail-closed)**.
+2. Muat `scope.yaml` → rusak → **DENY**.
+3. `scope_enforcement: none` → lolos (mis. CTF). `strict|moderate` → lanjut.
+4. Perintah diawali `omop-exec ` → percayakan pengecekan ke `omop-exec` (jalur sah).
+5. Perintah memuat binari jaringan langsung / `docker exec` bukan via `omop-exec` → **DENY** (cegah bypass).
+6. Perintah non-jaringan (git/ls/cat/…) → lolos.
 
-Daftar aturan (profil `default`) yang **memblokir** by default; profil `lab` melewatinya.
+`omop-exec` sendiri mengulang cek scope + terapkan `safety_constraints` sebelum `docker exec` (defense-in-depth).
 
-Contoh aturan (final list disepakati di implementasi):
-- Blok flag dump masif / write (mis. `sqlmap --dump-all`, `--os-shell`) di profil default.
-- Blok intensitas berlebih yang bau DoS (mis. thread/rate ekstrem).
-- Blok tool yang murni destruktif.
+### 4.6 Docker bridge
 
-Di Fase 0 kerangkanya dibangun + minimal 1 aturan uji; katalog penuh diperkaya seiring tool masuk per fase.
+- `docker/Dockerfile`: base `debian:stable-slim` + hanya alat uji-jembatan (`curl`, `iputils-ping`, `dnsutils`). **Tanpa tool pentest.**
+- `bin/omop-exec <toolspec> --target <t>`: cek scope+safety → `docker exec omop-<engagement> <cmd>` (cmd dari command-builder).
+- Container persisten per-engagement (dinaikkan oleh `omop-engagement`).
 
-### 3.4 Audit log — chain-of-custody
+### 4.7 Audit log
+`omop-exec` append JSON-per-baris ke `engagements/<t>/audit.log`: `ts, target, tool, decision, reason, authorization`. Timestamp diambil skrip (bukan agent).
 
-`omop-run` append ke `engagements/<t>/audit.log` (JSON per baris):
-
-```json
-{"ts":"2026-08-24T04:10:00Z","target":"api.acme.io","tool":"curl","decision":"ALLOW","reason":"in_scope:api.acme.io","authorization":"HackerOne #12345"}
-{"ts":"2026-08-24T04:10:05Z","target":"evil.com","tool":"curl","decision":"DENY","reason":"deny-by-default"}
-```
-
-> Timestamp diambil di dalam skrip (bukan oleh agent) supaya jujur.
-
-### 3.5 `hooks/scope-guard.sh` — pencegah bypass (lapis ke-2)
-
-Didaftarkan sebagai hook `PreToolUse` untuk tool **Bash** di `.claude/settings.json`. Menerima command yang akan dijalankan, lalu:
-- **IZIN** kalau command diawali `omop-run ` (jalur sah) atau jelas non-jaringan (git, ls, cat, dst).
-- **TOLAK** kalau command memuat binari jaringan langsung (curl/wget/nc/nmap/…) atau `docker exec …` yang **bukan** lewat `omop-run`.
-
-Ini menutup celah "agent nembak langsung tanpa lewat choke point". `omop-run` = kebenaran; hook = pagar keliling.
-
-### 3.6 Docker foundation
-
-- `docker/Dockerfile`: base ramping (mis. `debian:stable-slim`). Fase 0 **hanya** memasang alat uji-jembatan yang tidak berbahaya (mis. `curl`, `iputils-ping`, `dnsutils`) untuk membuktikan scope-check bekerja. **Tidak ada tool pentest.**
-- `bin/omop-container`: `up` (jalankan container persisten `omop-<engagement>` detached), `down`, `status`.
-
-### 3.7 `bin/omop-engagement` + `/engagement` command
-
-- `bin/omop-engagement <nama>`: buat `engagements/<nama>/` dari template `scope.yaml`, set `engagements/.active`, panggil `omop-container up`.
-- `.claude/commands/engagement.md`: slash command yang menuntun agent memandu user mengisi scope lalu memanggil skrip di atas.
+### 4.8 Commands (format OmOP)
+- `.claude/commands/engagement.md` → load skill `pentest-mode`, tuntun user isi `scope.yaml`, panggil `omop-engagement`.
+- `.claude/commands/mode.md` → set `mode` + `scope_enforcement` di engagement aktif.
+- Skill aktif Fase 0: **hanya `pentest-mode`** (dipanen dari OmOP, di-tuning ke config kita).
 
 ---
 
-## 4. Alur Data
+## 5. Kriteria Penerimaan (DoD Fase 0)
 
-```
-User: /engagement acme
-  └─ omop-engagement acme → tulis scope.yaml (user isi) → set .active → omop-container up
-User (atau agent): omop-run --target api.acme.io -- curl -I https://api.acme.io
-  └─ scope-guard hook: diawali "omop-run" → IZIN lewat
-  └─ omop-run: baca .active → validasi scope.yaml → cek target (in_scope) → safety check → audit ALLOW → docker exec
-Agent nakal: curl https://evil.com   (bypass)
-  └─ scope-guard hook: binari jaringan langsung, bukan omop-run → TOLAK (command tak pernah jalan)
-```
-
----
-
-## 5. Kriteria Penerimaan (Definition of Done Fase 0)
-
-Fase 0 **selesai** hanya jika semua tes ini hijau:
+Semua harus hijau (tes otomatis, target uji = domain contoh/loopback, tanpa jaringan nyata):
 
 | # | Tes | Harapan |
 |---|---|---|
-| T1 | `omop-run --target api.acme.io -- curl` (in_scope) | IZIN, ter-exec di container, audit `ALLOW` |
-| T2 | `omop-run --target evil.com -- curl` (luar scope) | TOLAK, exit 2, audit `DENY:deny-by-default` |
-| T3 | `omop-run --target blog.acme.com -- curl` (out_of_scope eksplisit) | TOLAK (pengecualian menang) |
-| T4 | Agent coba `curl https://evil.com` langsung (bypass) | Hook TOLAK, command tak jalan |
-| T5 | Agent coba `docker exec omop-acme curl evil.com` (bypass) | Hook TOLAK |
-| T6 | `omop-run …` tanpa engagement aktif | Fail-closed, exit 3 |
-| T7 | `scope.yaml` rusak/hilang | Fail-closed, TOLAK semua |
-| T8 | Aksi safety-profile terlarang (min. 1 aturan) di profil default | TOLAK; di profil `lab` → IZIN |
-| T9 | `/engagement` bikin struktur + container hidup + `.active` benar | Semua ada |
-| T10 | Audit log memuat ts, target, tool, decision, reason, authorization | Lengkap & benar |
-
-**Cara pembuktian:** semua tes ditulis sebagai skrip otomatis (bash test harness) yang jalan tanpa menyentuh jaringan nyata (target uji = domain contoh/loopback). Tidak ada "percaya saja" — harus ada output tes hijau.
+| T1 | `omop-exec curl --target api.acme.io` (in_scope) | ALLOW, ter-exec di container, audit ALLOW |
+| T2 | `omop-exec curl --target evil.com` (luar scope) | DENY, audit `deny-by-default` |
+| T3 | `omop-exec curl --target blog.acme.com` (out_of_scope) | DENY (pengecualian menang) |
+| T4 | Agent `curl https://evil.com` langsung (bypass) | Hook DENY, tak jalan |
+| T5 | Agent `docker exec omop-acme curl evil.com` (bypass) | Hook DENY |
+| T6 | Tanpa engagement aktif | Fail-closed, DENY |
+| T7 | `scope.yaml` rusak/hilang | Fail-closed, DENY |
+| T8 | `safety_constraints.block_destructive` aktif + aksi destruktif | DENY; kalau `none`/lab → ALLOW |
+| T9 | `scope_enforcement: none` (mode CTF) | perintah lolos |
+| T10 | `/engagement` + `/mode` bikin struktur + container hidup + `.active` benar | lengkap |
+| T11 | Audit log memuat ts/target/tool/decision/reason/authorization | lengkap |
+| T12 | `tools-catalog.json` tervalidasi schema + loader baca tool uji | OK |
 
 ---
 
-## 6. Yang Ditunda
-
-- Katalog safety-profile lengkap → diperkaya per fase saat tool masuk.
-- Pembatasan scope di **layer jaringan** container (mis. firewall egress) → hardening opsional Fase 6/7.
-- Rate limiting aktif → dipakai mulai Fase 1.
+## 6. Ditunda
+- Katalog `safety_constraints` lengkap → per-fase saat tool masuk.
+- `command-builder` penuh (banyak flag) → Fase 1.
+- Auto-detect mode dari target → Fase 6.
+- (Opsional) egress-lock jaringan container sebagai hardening ekstra → Fase 6/7, **bukan** Fase 0 (di luar pola OmOP).
 
 ---
 
 ## 7. Risiko & Mitigasi
-
 | Risiko | Mitigasi |
 |---|---|
-| Agent temukan cara bypass yang tak terpikir | Choke point sempit + hook deny-by-default untuk seluruh binari jaringan; audit tiap perintah |
-| `--target` diisi salah/menyesatkan oleh agent | Target dicocokkan ketat ke scope; kalau host asli command ≠ `--target`, itu tetap dibatasi oleh scope container + audit (dicatat sebagai catatan hardening Fase 1) |
-| Wildcard scope kelewat longgar (`*.com`) | Validasi `scope.yaml`: tolak wildcard TLD-level saat parsing |
-| Fail-open karena bug parsing | Semua jalur error → fail-closed (default TOLAK) |
+| Agent temukan bypass tak terduga | Choke point `omop-exec` + hook deny-by-default seluruh binari jaringan + audit |
+| `--target` menyesatkan (arg nembak host lain) | Diterima sebagai batas Fase 0 (jaminan = no-bypass + target jujur); egress-lock jaringan = hardening Fase 6/7 bila diperlukan |
+| Wildcard scope kelewat longgar | Validasi `scope.yaml`: tolak wildcard TLD-level |
+| Fail-open karena bug | Semua jalur error → fail-closed (DENY) |
