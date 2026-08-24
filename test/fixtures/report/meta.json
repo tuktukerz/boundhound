@@ -1,0 +1,15 @@
+{
+  "engagement": "acme",
+  "authorization": "HackerOne #1",
+  "mode": "bug-bounty",
+  "scope_enforcement": "strict",
+  "in_scope": {
+    "domains": ["*.acme.com"],
+    "cidrs": ["203.0.113.0/24"]
+  },
+  "out_of_scope": {
+    "domains": ["blog.acme.com"],
+    "cidrs": []
+  },
+  "notes": ""
+}

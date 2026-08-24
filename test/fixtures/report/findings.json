@@ -1,0 +1,59 @@
+[
+  {
+    "id": "sqli-acme-1",
+    "category": "exploit",
+    "type": "sqli",
+    "target": "acme.io",
+    "severity": "high",
+    "confidence": "confirmed",
+    "evidence": {
+      "dbms": "MySQL >= 5.6",
+      "injection_points": [{ "parameter": "id", "type": "boolean-based blind" }]
+    },
+    "verified": true
+  },
+  {
+    "id": "nuclei-acme-1",
+    "category": "enum",
+    "type": "nuclei",
+    "target": "http://acme.io",
+    "severity": "medium",
+    "confidence": "reported",
+    "evidence": {
+      "template_id": "exposed-panel-admin",
+      "name": "Exposed Admin Panel",
+      "matched_at": "http://acme.io/admin"
+    },
+    "verified": false
+  },
+  {
+    "id": "port-acme-80",
+    "category": "recon",
+    "type": "open-port",
+    "target": "acme.io",
+    "severity": "info",
+    "confidence": "reported",
+    "evidence": { "port": 80, "proto": "tcp", "service": "http" },
+    "verified": false
+  },
+  {
+    "id": "http-acme-1",
+    "category": "recon",
+    "type": "http-service",
+    "target": "http://acme.io",
+    "severity": "info",
+    "confidence": "reported",
+    "evidence": { "status_code": 200, "title": "Acme Home", "tech": ["nginx"] },
+    "verified": false
+  },
+  {
+    "id": "sub-api-acme",
+    "category": "recon",
+    "type": "subdomain",
+    "target": "api.acme.io",
+    "severity": "info",
+    "confidence": "reported",
+    "evidence": {},
+    "verified": false
+  }
+]
