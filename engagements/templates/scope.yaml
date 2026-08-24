@@ -1,5 +1,5 @@
 engagement: REPLACE_ME
-authorization: "REPLACE_ME — bukti izin (H1/Bugcrowd/kontrak/lab)"
+authorization: "REPLACE_ME — proof of authorization (H1/Bugcrowd/contract/lab)"
 mode: bug-bounty
 scope_enforcement: strict
 in_scope:
