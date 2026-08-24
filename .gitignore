@@ -1,0 +1,6 @@
+# .gitignore
+node_modules/
+engagements/*/output/
+engagements/*/audit.log
+engagements/.active
+*.log
