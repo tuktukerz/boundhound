@@ -15,7 +15,13 @@ export function createEngagement(name, { rootDir, codeDir, dataDir, containerUp 
     writeFileSync(scopePath, tpl.replace("REPLACE_ME", name))
   }
   writeFileSync(join(dDir, "engagements", ".active"), name)
-  const up = containerUp ?? ((n) => execFileSync("bin/omop-container", ["up", n], { stdio: "inherit" }))
+  // Absolute path built from cDir (code root), not a bare relative path: a
+  // bare "bin/omop-container" resolves against process.cwd(), which breaks
+  // as soon as this runs from any directory other than the repo checkout
+  // (e.g. plugin mode, or a foreign project dir). cDir is already resolved
+  // above (CLAUDE_PLUGIN_ROOT in plugin mode, repo root in dev mode), so
+  // reuse it here the same way runExec resolves the catalog path from cDir.
+  const up = containerUp ?? ((n) => execFileSync(join(cDir, "bin", "omop-container"), ["up", n], { stdio: "inherit" }))
   up(name)
   return { path: dir }
 }

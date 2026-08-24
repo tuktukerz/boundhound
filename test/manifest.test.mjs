@@ -6,7 +6,7 @@
 // load — Claude Code's own loader is exercised by actually installing the
 // plugin (out of scope for `bun test`).
 import { test, expect } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
@@ -50,6 +50,34 @@ test("hooks/hooks.json PreToolUse matcher is the exact full Phase-0 tool set", (
   // Exact-match (not .includes) so a future narrowing of the matcher — e.g.
   // dropping to just "WebFetch" — fails loudly instead of passing silently.
   expect(matchers.some((m) => m === "Bash|WebFetch|WebSearch|Write|Edit")).toBe(true)
+})
+
+// Cross-check parity: dev-mode (.claude/settings.json, $CLAUDE_PROJECT_DIR)
+// and plugin-mode (hooks/hooks.json, ${CLAUDE_PLUGIN_ROOT}) are two
+// independently maintained copies of the SAME PreToolUse registration (spec
+// §3: "Document the two-mode duplication so they don't drift"). The tests
+// above each assert one file against a hardcoded literal, which would keep
+// passing even if the two files drifted apart from each other as long as
+// both still happened to match that literal today. This test instead checks
+// the two files against EACH OTHER, so a future edit to either file's
+// matcher that isn't mirrored in the other fails the suite immediately.
+test("PreToolUse matcher is identical across dev-mode settings.json and plugin-mode hooks.json", () => {
+  const settings = readJson(".claude/settings.json")
+  const hooks = readJson("hooks/hooks.json")
+  const settingsMatchers = settings.hooks.PreToolUse.map((entry) => entry.matcher)
+  const hooksMatchers = hooks.hooks.PreToolUse.map((entry) => entry.matcher)
+  expect(settingsMatchers).toEqual(hooksMatchers)
+})
+
+// P6 hardening: plugin.json's declared component paths must resolve to real
+// files/dirs, not just be well-typed strings — a typo'd path would still
+// pass the "declares hooks"/"is a string" checks above but silently fail to
+// load anything once Claude Code actually installs the plugin.
+test("plugin.json's declared skills/commands/hooks paths exist on disk", () => {
+  const manifest = readJson(".claude-plugin/plugin.json")
+  expect(existsSync(join(repoRoot, manifest.skills))).toBe(true)
+  expect(existsSync(join(repoRoot, manifest.commands))).toBe(true)
+  expect(existsSync(join(repoRoot, manifest.hooks))).toBe(true)
 })
 
 test("marketplace.json parses as valid JSON", () => {
