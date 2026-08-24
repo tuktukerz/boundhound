@@ -13,8 +13,8 @@
 // docker smoke (docker/bridge-smoke.test.mjs, self-skips without a running
 // container) rather than here, since they are not reachable purely through
 // runExec/classifyCommand. See task-15-report.md for the full mapping.
-import { test, expect, beforeEach } from "bun:test"
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs"
+import { test, expect, beforeEach, afterEach } from "bun:test"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runExec } from "../bin/omop-exec.mjs"
@@ -43,6 +43,9 @@ beforeEach(() => {
   writeFileSync(join(root, "tools-catalog.json"), catalog())
   calls = []
 })
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true })
+})
 const run = (args) => runExec(args, { rootDir: root, now, exec })
 
 test("T1 in-scope ALLOW + audit", () => {
@@ -56,6 +59,9 @@ test("T2 out-of-scope DENY (deny-by-default)", () => {
   const r = run(["curl", "--target", "evil.com", "--"])
   expect(r.code).toBe(2)
   expect(calls.length).toBe(0)
+  // Fail loudly if a future refactor changes the reason path: this must
+  // stay the deny-by-default fallthrough, not some other DENY reason.
+  expect(r.message).toMatch(/deny-by-default/)
 })
 
 test("T3 out_of_scope wins over a broader in_scope wildcard -> DENY", () => {
@@ -64,6 +70,7 @@ test("T3 out_of_scope wins over a broader in_scope wildcard -> DENY", () => {
   const r = run(["curl", "--target", "blog.acme.com", "--"])
   expect(r.code).toBe(2)
   expect(calls.length).toBe(0)
+  expect(r.message).toMatch(/out_of_scope/)
 })
 
 test("T4 direct curl bypass -> guard DENY", () => {
@@ -83,6 +90,12 @@ test("T6 no active engagement -> fail-closed exit 3", () => {
   const r = run(["curl", "--target", "api.acme.io", "--"])
   expect(r.code).toBe(3)
   expect(calls.length).toBe(0)
+  // runExec formats this as `fail-closed: ${e.message}` where e.message is
+  // NoActiveEngagement's "no active engagement" — assert both so a future
+  // refactor that silently drops the fail-closed prefix, or that swaps in
+  // an unrelated error, fails loudly here.
+  expect(r.message).toMatch(/fail-closed/)
+  expect(r.message).toMatch(/no active engagement/)
 })
 
 test("T7 broken scope.yaml (missing authorization) -> fail-closed exit 3", () => {
@@ -90,12 +103,17 @@ test("T7 broken scope.yaml (missing authorization) -> fail-closed exit 3", () =>
   const r = run(["curl", "--target", "api.acme.io", "--"])
   expect(r.code).toBe(3)
   expect(calls.length).toBe(0)
+  // `fail-closed: ${ScopeError.message}` — ScopeError's message is
+  // "missing authorization" for this exact broken scope.yaml.
+  expect(r.message).toMatch(/fail-closed/)
+  expect(r.message).toMatch(/missing authorization/)
 })
 
 test("T8 destructive flag -> safety DENY exit 2", () => {
   const r = run(["curl", "--target", "api.acme.io", "--", "--os-shell"])
   expect(r.code).toBe(2)
   expect(calls.length).toBe(0)
+  expect(r.message).toMatch(/destructive/)
 })
 
 test("T9 scope_enforcement: none lets any target through (no scope check bypassed elsewhere)", () => {
@@ -103,13 +121,20 @@ test("T9 scope_enforcement: none lets any target through (no scope check bypasse
   const r = run(["curl", "--target", "anything.example", "--", "-I"])
   expect(r.code).toBe(0)
   expect(calls.length).toBe(1)
+  // Prove the rest of the pipeline (safety check, catalog lookup, audit)
+  // still ran normally — "none" must bypass only the scope check, not
+  // auditing or any other safety gate.
+  const audit = readFileSync(join(root, "engagements", "acme", "audit.log"), "utf8")
+  const line = JSON.parse(audit.trim().split("\n")[0])
+  expect(line.decision).toBe("ALLOW")
+  expect(line.target).toBe("anything.example")
 })
 
 test("T11 audit line carries all required fields", () => {
   run(["curl", "--target", "api.acme.io", "--"])
   const line = JSON.parse(readFileSync(join(root, "engagements", "acme", "audit.log"), "utf8").trim().split("\n")[0])
   for (const k of ["ts", "target", "tool", "decision", "reason", "authorization"]) {
-    expect(line[k] ?? null).not.toBe(undefined)
+    expect(Object.hasOwn(line, k)).toBe(true)
   }
   expect(line.authorization).toBe("H1 #1")
   expect(line.decision).toBe("ALLOW")
@@ -120,6 +145,6 @@ test("T11b audit line is written even on DENY (deny path is auditable too)", () 
   const line = JSON.parse(readFileSync(join(root, "engagements", "acme", "audit.log"), "utf8").trim().split("\n")[0])
   expect(line.decision).toBe("DENY")
   for (const k of ["ts", "target", "tool", "decision", "reason", "authorization"]) {
-    expect(line[k] ?? null).not.toBe(undefined)
+    expect(Object.hasOwn(line, k)).toBe(true)
   }
 })
