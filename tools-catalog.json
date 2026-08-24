@@ -1,7 +1,7 @@
 {
   "$schema": "./docs/tools-catalog.schema.json",
   "version": "0.0.0",
-  "categories": ["utility", "recon", "enum"],
+  "categories": ["utility", "recon", "enum", "exploit"],
   "tools": [
     {
       "tools_name": "curl",
@@ -247,6 +247,89 @@
       "tags": ["vuln-scan", "detection", "tech-detect"],
       "requires_root": false,
       "output_format": ["jsonl"]
+    },
+    {
+      "tools_name": "sqlmap",
+      "description": "SQL-injection detection, confirmation, and light non-destructive proof (DBMS/parameter/database names — never dump contents, shells, or files)",
+      "category": "exploit",
+      "command": {
+        "base": "sqlmap",
+        "target_flag": "-u",
+        "flags": [
+          { "name": "--batch", "type": "boolean", "description": "non-interactive mode (always set)" },
+          {
+            "name": "-p",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[A-Za-z0-9_,]+$",
+            "description": "parameter(s) to test"
+          },
+          {
+            "name": "--data",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[A-Za-z0-9._=&%+~][A-Za-z0-9._=&%+~-]*$",
+            "description": "POST body (cannot express a host)"
+          },
+          {
+            "name": "--level",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[1-5]$",
+            "description": "test level (also safety-capped ≤3)"
+          },
+          {
+            "name": "--risk",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[1-3]$",
+            "description": "risk level (also safety-capped ≤2)"
+          },
+          {
+            "name": "--dbms",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[A-Za-z]+$",
+            "description": "force back-end DBMS"
+          },
+          {
+            "name": "--technique",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[BEUSTQ]+$",
+            "description": "SQLi technique(s)"
+          },
+          {
+            "name": "--threads",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+$",
+            "description": "concurrent requests (also safety-capped)"
+          },
+          {
+            "name": "--timeout",
+            "type": "string",
+            "takes_value": true,
+            "value_pattern": "^[0-9]+$",
+            "description": "seconds to wait before timeout"
+          },
+          { "name": "--dbs", "type": "boolean", "description": "list database names (proof only)" },
+          { "name": "--current-db", "type": "boolean", "description": "show current database name" },
+          { "name": "--current-user", "type": "boolean", "description": "show current user name" },
+          { "name": "--banner", "type": "boolean", "description": "show DBMS banner" },
+          { "name": "--is-dba", "type": "boolean", "description": "check if current user is DBA" },
+          { "name": "--hostname", "type": "boolean", "description": "show DBMS server hostname" }
+        ]
+      },
+      "installation": {
+        "linux": { "command": "apt-get install -y sqlmap", "manager": "apt" }
+      },
+      "check_installed": { "command": "sqlmap --version", "exit_code": 0 },
+      "skills_loader": "",
+      "phase": ["exploit"],
+      "tags": ["sqli", "exploit", "proof-of-vuln"],
+      "requires_root": false,
+      "output_format": ["text"]
     }
   ]
 }

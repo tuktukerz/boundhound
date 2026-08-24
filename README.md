@@ -4,14 +4,14 @@
 
 ---
 
-## 🚧 Status: Phase 2 — Enumeration
+## 🚧 Status: Phase 3 — Exploitation
 
 ```
 [0] Foundation & Safety   ██████████ done
 [0.5] Plugin packaging    ██████████ done
 [1] Recon                 ██████████ done
-[2] Enumeration           ██████████ done   <- you are here
-[3] Exploitation          ░░░░░░░░░░ not started
+[2] Enumeration           ██████████ done
+[3] Exploitation          ██████████ done   <- you are here
 [4] Verification          ░░░░░░░░░░ not started
 [5] Reporting             ░░░░░░░░░░ not started
 [6] Orchestrator          ░░░░░░░░░░ not started
@@ -25,6 +25,8 @@
 **Phase 1 added the first real attack-surface-mapping capability: recon** — subfinder, httpx, and nmap, all running through the same `bh-exec` choke point proven in Phase 0. See **Recon** below.
 
 **Phase 2 adds enumeration: ffuf and nuclei**, deepening what recon found — still through the same `bh-exec` choke point, with no shortcuts. See **Enumeration** below.
+
+**Phase 3 adds exploitation: sqlmap, in a strictly bounded proof-of-vulnerability mode** — confirming a SQL-injection point is real without ever exfiltrating data, gaining a shell, or touching the filesystem. This is the phase where "fences first, weapons later" gets tested against an actual weapon: sqlmap's own dump/shell/file/eval flags are hard-denied by two independent layers before the tool ever runs. See **Exploitation** below.
 
 ## Why this exists
 
@@ -64,7 +66,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 266 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 366 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -138,6 +140,57 @@ actual local target container and runs the real `ffuf`/`nuclei` binaries
 against it through `bh-exec`, exactly as `recon-e2e.test.mjs` does for
 Phase 1.
 
+## Exploitation
+
+Phase 3 confirms a vulnerability recon/enum already surfaced, orchestrated
+by the self-authored `pentest-exploit` skill (run via `/exploit`), using
+**`sqlmap`** — and only `sqlmap` — run through `bh-exec` exactly like every
+other tool in this system. It consumes both `recon-map.json` and
+`enum-map.json` (re-screening every candidate host against the engagement's
+*current* scope before touching it) and refuses to run at all if either map
+doesn't exist yet — exploit never derives its own target list.
+
+**This phase confirms; it does not weaponize.** sqlmap runs in a strictly
+bounded proof-of-vulnerability mode: it confirms a SQL-injection point is
+real, identifies the DBMS, and recovers database *names* as proof. It
+**never dumps table contents, never opens an OS or SQL shell, never reads
+or writes a file on the target, and never runs an arbitrary OS/SQL command
+or Python `--eval`.** sqlmap's own flags for all of that
+(`--dump`/`--dump-all`, `--os-shell`/`--os-pwn`/`--os-cmd`,
+`--sql-shell`/`--sql-query`, `--file-read`/`--file-write`/`--file-dest`,
+`--reg-*`, `--priv-esc`, `--msf-path`, `--os-smbrelay`, `--eval`,
+`--os-bof`) are denied outright, by **two independent layers**:
+
+1. **The catalog allowlist.** `tools-catalog.json`'s sqlmap entry declares
+   only the bounded/proof flags (`-p`, `--data`, `--level`, `--risk`,
+   `--dbms`, `--technique`, `--threads`, `--timeout`, `--batch`, `--dbs`,
+   `--current-db`, `--current-user`, `--banner`, `--is-dba`, `--hostname`)
+   — every weaponizing flag above is deliberately left undeclared, so
+   `bh-exec`'s extra-args allowlist rejects it as an unrecognized token
+   before a command is even built.
+2. **`safety-check`'s `block_destructive` gate**, independently of the
+   catalog, matches and denies the same flags outright — and caps
+   `--level`/`--risk` at ≤3/≤2 whenever `block_dos` is on, so even an
+   allowed scan can't escalate into destructive payload territory.
+
+Either layer alone stops weaponization; both hold at once, so a mistake in
+one doesn't reopen it.
+
+A final step, `bh-exploit-map` (`bin/bh-exploit-map.mjs`), reads the raw
+`sqlmap` stdout captures already on disk and normalizes them into one
+`exploit-map.json`, written to
+`engagements/<name>/output/exploit/exploit-map.json`.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/exploit-e2e.test.mjs`](test/exploit-e2e.test.mjs) — which spins up
+an actual local, deliberately-vulnerable SQL-injection target container and
+drives the real `bh-exec.mjs`/`bh-exploit-map.mjs` CLIs against it, proving
+**both halves of the safety story in one real run**: sqlmap genuinely
+confirms a SQL-injection point (DBMS SQLite) and the result lands in
+`exploit-map.json`, *and* `--os-shell`/`--dump` are hard-denied (exit code
+2, audit-logged) before sqlmap ever runs them — exactly as
+`recon-e2e.test.mjs`/`enum-e2e.test.mjs` do for their own phases.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -162,7 +215,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 266 pass / 1 skip
+bun test                        # 366 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -181,13 +234,15 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   skills/pentest-mode/     active skill (engagement mode + scope selector)
   skills/pentest-recon/    active skill (Phase 1 recon orchestrator: subfinder -> httpx -> nmap -> bh-recon-map)
   skills/pentest-enum/     active skill (Phase 2 enum orchestrator: ffuf -> nuclei -> bh-enum-map)
-  commands/                /engagement, /mode, /recon, /enum
+  skills/pentest-exploit/  active skill (Phase 3 exploit orchestrator: sqlmap -> bh-exploit-map, bounded proof-of-vuln)
+  commands/                /engagement, /mode, /recon, /enum, /exploit
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
   bh-engagement.mjs      scaffold a new engagement
   bh-recon-map.mjs       merges subfinder/httpx/nmap output into recon-map.json
   bh-enum-map.mjs        merges ffuf/nuclei output into enum-map.json
+  bh-exploit-map.mjs     merges sqlmap output into exploit-map.json
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -195,14 +250,15 @@ hooks/
 src/
   paths.mjs                code root vs data root resolution (plugin vs local-project)
   scope/                   parser + matcher (deny-by-default) + fail-closed resolver
-  safety/                  blocks destructive/DoS actions (incl. ffuf/nuclei concurrency & rate caps)
+  safety/                  blocks destructive/DoS actions (incl. ffuf/nuclei concurrency & rate caps, sqlmap weaponizing-flag denial + --level/--risk caps)
   catalog/                 tools-catalog.json loader (ToolEntry schema)
   guard/                   command classification, anti-bypass
   audit/                   JSONL audit log
   recon/                   recon-map.mjs: normalizes subfinder/httpx/nmap output into recon-map.json
   enum/                    enum-map.mjs: normalizes ffuf/nuclei output into enum-map.json
+  exploit/                 exploit-map.mjs: normalizes sqlmap output into exploit-map.json
 docker/
-  Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2)
+  Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2) + sqlmap (Phase 3)
   wordlists/               bundled wordlist for ffuf content discovery
 skills-library/            authored skill library (promoted to active per phase)
 docs/
