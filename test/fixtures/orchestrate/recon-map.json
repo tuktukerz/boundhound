@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-08-25T00:00:00.000Z",
+  "subdomains": ["api.acme.io", "evil.com"],
+  "http_services": [
+    { "url": "http://acme.io", "host": "acme.io", "status_code": 200, "title": "Acme Home", "tech": ["nginx"] },
+    { "url": "http://api.acme.io/item?id=1", "host": "api.acme.io", "status_code": 200, "title": "Item", "tech": [] }
+  ],
+  "hosts": [
+    {
+      "host": "acme.io",
+      "ports": [
+        { "port": 80, "proto": "tcp", "state": "open", "service": "http" },
+        { "port": 22, "proto": "tcp", "state": "open", "service": "ssh" }
+      ]
+    }
+  ]
+}
