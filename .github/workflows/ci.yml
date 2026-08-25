@@ -1,10 +1,13 @@
 name: CI
 
 # Review gate: runs on every pull request and on pushes to main.
+# workflow_dispatch lets the heavy docker e2e be run on demand from the
+# Actions tab without gating everyday PRs.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref (e.g. a new push to a PR).
 concurrency:
@@ -39,11 +42,13 @@ jobs:
   e2e:
     name: docker e2e (real containers)
     runs-on: ubuntu-latest
-    # Best-effort: building the bh:base tool image + downloading tools can fail
-    # transiently on a hosted runner. This job must never red the overall run or
-    # block a merge — the deterministic `test` job is the required gate, and the
-    # real e2e are also run locally. continue-on-error keeps this visible but
-    # non-fatal.
+    # Manual-only. Building the bh:base tool image + downloading tools is heavy
+    # and can fail transiently on a hosted runner, so this does NOT run on every
+    # PR/push (that would just add red noise). The deterministic `test` job is
+    # the required gate; the real e2e are run locally and can be triggered here
+    # on demand via the Actions tab ("Run workflow"). continue-on-error keeps a
+    # manual run non-fatal too.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
