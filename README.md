@@ -83,6 +83,8 @@ Enforcement is a **git-tracked hook + a CLI choke point** — a layer the agent 
 
 [`skills-library/`](skills-library/) holds **81 self-authored technique playbooks** across 11 categories (web-injection, access-control, auth/session, API, recon/OSINT, infra, info-disclosure, business-logic, client-side, methodology). Each names the bounded tool(s) and command(s) it uses; where a technique has no bounded tool yet, it says so and gives the safe in-scope path instead of inventing a capability. All are machine-validated (`test/skill-library.test.mjs`). These are source playbooks — the active per-phase skills under `.claude/skills/` are promoted deliberately.
 
+Promote/demote a playbook with `bh-skill` (or `/skill`): `node bin/bh-skill.mjs list|promote <slug>|demote <slug>`. Promoting copies `skills-library/<slug>/` into `.claude/skills/<slug>/`; the 8 core pipeline skills can't be demoted.
+
 ## 🧪 Run from a clone (dev)
 
 ```bash
