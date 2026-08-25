@@ -22,21 +22,42 @@ import { codeRoot, dataRoot } from "../src/paths.mjs"
 // bh-enum-map/bh-exploit-map) can read it back -- must match exactly where
 // those CLIs read from (re-verified against bin/bh-recon-map.mjs,
 // bin/bh-enum-map.mjs, bin/bh-exploit-map.mjs).
+//
+// Invariant: within a single run, no two planned steps' captured stdout may
+// ever overwrite each other. A run CAN plan more than one step per host per
+// stage -- e.g. exploit:sqlmap draws candidate URLs from enumMap.content
+// (ffuf's match results), and ffuf routinely returns many matches on one
+// host that still share the same query key, so the driver's dedupe() does
+// NOT collapse them into one sqlmap step. The same structural hazard
+// applies to nuclei/ffuf if http_services ever carries >1 URL for one host.
+// So each format is handled per its own concatenability:
 //   - subfinder/httpx write into ONE shared file across all their steps
 //     (bh-recon-map concatenates subfinder.jsonl/httpx.jsonl as a whole) ->
 //     append.
-//   - nmap/nuclei/ffuf/sqlmap each get their OWN file keyed by the target's
-//     host (bh-recon-map globs every *.gnmap; bh-enum-map globs every
-//     nuclei*.jsonl/ffuf*.json; bh-exploit-map globs every *.sqlmap.txt) ->
-//     one write per host is enough (a full-scan run only ever plans one
-//     step per host per stage).
+//   - nmap gets its OWN file keyed by the target's host (bh-recon-map globs
+//     every *.gnmap) -> write is safe: the planner dedupes hosts before
+//     ever building an nmap step, so nmap never plans two steps for the
+//     same host in one run.
+//   - nuclei is JSONL (line-delimited) -- bh-enum-map reads the whole
+//     nuclei*.jsonl file line by line, so concatenating multiple steps'
+//     records is correct -> append, same pattern as subfinder/httpx.
+//   - sqlmap is a plain-text blob -- bh-exploit-map reads the whole
+//     *.sqlmap.txt file as one string, so concatenating multiple
+//     steps'/hosts' output is safe -> append.
+//   - ffuf is a single JSON document and CANNOT be concatenated (that would
+//     produce invalid JSON) -> keep "write", but make the filename unique
+//     per step via a deterministic per-host counter (see `ffufStepCounts`
+//     in makeRunner below) so two ffuf steps for the same host land in two
+//     different files instead of colliding. bh-enum-map globs every
+//     ffuf*.json file and parses each as its own JSON document, so several
+//     ffuf-<host>-<n>.json files are read and merged correctly.
 const OUTPUT_RULES = {
   subfinder: { dir: "recon", file: () => "subfinder.jsonl", mode: "append" },
   httpx: { dir: "recon", file: () => "httpx.jsonl", mode: "append" },
   nmap: { dir: "recon", file: (host) => `${host}.gnmap`, mode: "write" },
-  nuclei: { dir: "enum", file: (host) => `nuclei-${host}.jsonl`, mode: "write" },
-  ffuf: { dir: "enum", file: (host) => `ffuf-${host}.json`, mode: "write" },
-  sqlmap: { dir: "exploit", file: (host) => `${host}.sqlmap.txt`, mode: "write" },
+  nuclei: { dir: "enum", file: (host) => `nuclei-${host}.jsonl`, mode: "append" },
+  ffuf: { dir: "enum", file: (host, n) => `ffuf-${host}-${n}.json`, mode: "write" },
+  sqlmap: { dir: "exploit", file: (host) => `${host}.sqlmap.txt`, mode: "append" },
 }
 
 // Every synthesizer CLI runFullscan's `synth(kind)` can be asked for, and
@@ -78,6 +99,14 @@ function safeFilenamePart(s) {
 // way, but there is nothing exceptional about a bh-exec DENY: it is the
 // system working as designed).
 function makeRunner({ codeDir, dataDir, name, spawn, log }) {
+  // Deterministic per-run, per-host counter for ffuf's output filename (the
+  // only tool that keeps "write" mode -- its JSON output can't be
+  // concatenated). A plain Map held in this closure, incremented once per
+  // ffuf step for a given host: Date.now()/Math.random()/argless `new
+  // Date()` all throw in this codebase, so a counter is the only
+  // deterministic source of per-step uniqueness available here.
+  const ffufStepCounts = new Map()
+
   return ({ tool, target, flags, stage }) => {
     const args = [join(codeDir, "bin", "bh-exec.mjs"), tool, "--target", target, "--data-dir", dataDir, "--", ...(flags ?? [])]
     const result = spawn("node", args, { encoding: "utf8" }) ?? {}
@@ -101,7 +130,15 @@ function makeRunner({ codeDir, dataDir, name, spawn, log }) {
     const outDir = join(dataDir, "engagements", name, "output", rule.dir)
     mkdirSync(outDir, { recursive: true })
     const host = safeFilenamePart(deriveHost(target))
-    const outPath = join(outDir, rule.file(host))
+    let filename
+    if (tool === "ffuf") {
+      const next = (ffufStepCounts.get(host) ?? 0) + 1
+      ffufStepCounts.set(host, next)
+      filename = rule.file(host, next)
+    } else {
+      filename = rule.file(host)
+    }
+    const outPath = join(outDir, filename)
     const stdout = typeof result.stdout === "string" ? result.stdout : ""
 
     if (rule.mode === "append") {
@@ -212,8 +249,16 @@ function extractFlags(argv) {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
 if (isMain) {
   const { dataDir, noExploit } = extractFlags(process.argv.slice(2))
-  runFullscan({ dataDir: dataDir ?? undefined, exploit: !noExploit }).then((r) => {
-    if (r.message) process.stderr.write(r.message + "\n")
-    process.exit(r.code)
-  })
+  runFullscan({ dataDir: dataDir ?? undefined, exploit: !noExploit })
+    .then((r) => {
+      if (r.message) process.stderr.write(r.message + "\n")
+      process.exit(r.code)
+    })
+    .catch((err) => {
+      // Fail-closed on any unexpected rejection on the entry path: a short
+      // stderr message + non-zero exit, never a raw Node stack trace, and
+      // never silently swallowed.
+      process.stderr.write(`bh-fullscan: unexpected error: ${err && err.message ? err.message : String(err)}\n`)
+      process.exit(1)
+    })
 }

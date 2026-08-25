@@ -1,6 +1,6 @@
 // bin/bh-fullscan.test.mjs
 import { test, expect, beforeEach } from "bun:test"
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runFullscan } from "./bh-fullscan.mjs"
@@ -59,10 +59,44 @@ function writeScope(text) {
   writeFileSync(join(engagementDir, "scope.yaml"), text)
 }
 
-function seedReconMap() {
+function seedReconMap(map = RECON_MAP) {
   const reconDir = join(outputDir, "recon")
   mkdirSync(reconDir, { recursive: true })
-  writeFileSync(join(reconDir, "recon-map.json"), JSON.stringify(RECON_MAP))
+  writeFileSync(join(reconDir, "recon-map.json"), JSON.stringify(map))
+}
+
+function seedEnumMap(map) {
+  const enumDir = join(outputDir, "enum")
+  mkdirSync(enumDir, { recursive: true })
+  writeFileSync(join(enumDir, "enum-map.json"), JSON.stringify(map))
+}
+
+// Two http_services on the SAME host (acme.io), each with a distinct query
+// param -- reproduces the real-world shape that makes ffuf plan >1 step for
+// one host (and, via exploit:sqlmap's enumMap.content candidates below,
+// makes sqlmap do the same).
+const RECON_MAP_TWO_HTTP_SERVICES = {
+  generated_at: "2026-08-25T00:00:00.000Z",
+  subdomains: [],
+  http_services: [
+    { url: "http://acme.io/search?q=x", host: "acme.io", status_code: 200, title: "t1", tech: [] },
+    { url: "http://acme.io/login?user=y", host: "acme.io", status_code: 200, title: "t2", tech: [] },
+  ],
+  hosts: [
+    { host: "acme.io", ports: [{ port: 80, proto: "tcp", state: "open", service: "http" }] },
+  ],
+}
+
+// enum-map.json content carrying a SECOND distinct param-URL on the same
+// host as RECON_MAP's single http_service -- this is exactly how ffuf's
+// match results (enumMap.content) give exploit:sqlmap a second candidate
+// URL for a host recon-map only ever saw one URL for (the false claim the
+// old OUTPUT_RULES comment made).
+const ENUM_MAP_EXTRA_SQLMAP_TARGET = {
+  generated_at: "2026-08-25T00:00:00.000Z",
+  content: [{ url: "http://acme.io/login?user=y", path: "login", status: 200, length: 10, words: 2, host: "acme.io" }],
+  findings: [],
+  by_severity: { info: 0, low: 0, medium: 0, high: 0, critical: 0 },
 }
 
 beforeEach(() => {
@@ -223,7 +257,10 @@ test("captured stdout is written to the stage's output file where the map-builde
   expect(readFileSync(join(outputDir, "recon", "httpx.jsonl"), "utf8")).toContain("line-1")
   expect(readFileSync(join(outputDir, "recon", "acme.io.gnmap"), "utf8")).toContain("line-1")
   expect(readFileSync(join(outputDir, "enum", "nuclei-acme.io.jsonl"), "utf8")).toContain("line-1")
-  expect(existsSync(join(outputDir, "enum", "ffuf-acme.io.json"))).toBe(true)
+  // ffuf keeps "write" mode but its filename now carries a per-host step
+  // counter (started in this fix) so a single-step run produces
+  // "ffuf-<host>-1.json" rather than the old "ffuf-<host>.json".
+  expect(existsSync(join(outputDir, "enum", "ffuf-acme.io-1.json"))).toBe(true)
   expect(readFileSync(join(outputDir, "exploit", "acme.io.sqlmap.txt"), "utf8")).toContain("line-1")
 })
 
@@ -248,4 +285,79 @@ test("a bh-exec DENY (exit 2) is logged and skipped, not fatal -- other steps st
   // ...and every later stage still ran
   expect(execCalls(calls).some((c) => c.args[1] === "sqlmap")).toBe(true)
   expect(logLines.some((l) => l.includes("DENY") && l.includes("nmap"))).toBe(true)
+})
+
+// --- output-file collision regressions (no two steps' stdout may overwrite
+// each other within a single run) -----------------------------------------
+
+test("exploit:sqlmap plans 2 steps for the same host -> append mode keeps BOTH steps' stdout, not just the last", async () => {
+  writeScope(VALID_SCOPE)
+  // RECON_MAP's own http_service ("...search?q=x") plus enumMap.content's
+  // extra url ("...login?user=y") are two DISTINCT candidate URLs on the
+  // SAME host (acme.io), each carrying a query param -> targetsForStage
+  // plans 2 sqlmap steps, neither collapsed by dedupe() (the urls differ).
+  seedReconMap()
+  seedEnumMap(ENUM_MAP_EXTRA_SQLMAP_TARGET)
+
+  const calls = []
+  const spawn = (cmd, args) => {
+    calls.push({ cmd, args })
+    if (args[1] === "sqlmap") {
+      const target = args[3]
+      return { status: 0, stdout: `sqlmap-output-for::${target}\n`, stderr: "" }
+    }
+    return { status: 0, stdout: "generic-output\n", stderr: "" }
+  }
+
+  const r = await runFullscan({ dataDir: root, spawn })
+  expect(r.code).toBe(0)
+
+  const sqlmapCalls = execCalls(calls).filter((c) => c.args[1] === "sqlmap")
+  expect(sqlmapCalls.length).toBe(2)
+  const targets = sqlmapCalls.map((c) => c.args[3])
+  expect(new Set(targets).size).toBe(2) // both steps target the same host but distinct urls
+
+  // Both steps write into the SAME <host>.sqlmap.txt (keyed on host alone) --
+  // with the old "write" mode, only the second step's stdout would survive.
+  const sqlmapOut = readFileSync(join(outputDir, "exploit", "acme.io.sqlmap.txt"), "utf8")
+  for (const t of targets) {
+    expect(sqlmapOut).toContain(`sqlmap-output-for::${t}`)
+  }
+})
+
+test("enum:ffuf plans 2 steps for the same host -> each step lands in its own distinct file, no overwrite", async () => {
+  writeScope(VALID_SCOPE)
+  // Two http_services on the same host -> enum:ffuf plans 2 steps for
+  // acme.io (liveHttpServiceUrls yields one url per service, unfiltered by
+  // dedupe since the urls themselves differ).
+  seedReconMap(RECON_MAP_TWO_HTTP_SERVICES)
+
+  const calls = []
+  const spawn = (cmd, args) => {
+    calls.push({ cmd, args })
+    if (args[1] === "ffuf") {
+      const target = args[3]
+      return { status: 0, stdout: `ffuf-marker::${target}\n`, stderr: "" }
+    }
+    return { status: 0, stdout: "generic-output\n", stderr: "" }
+  }
+
+  const r = await runFullscan({ dataDir: root, spawn })
+  expect(r.code).toBe(0)
+
+  const ffufCalls = execCalls(calls).filter((c) => c.args[1] === "ffuf")
+  expect(ffufCalls.length).toBe(2)
+  const targets = ffufCalls.map((c) => c.args[3])
+  expect(new Set(targets).size).toBe(2)
+
+  const enumDir = join(outputDir, "enum")
+  const ffufFiles = readdirSync(enumDir).filter((f) => f.startsWith("ffuf") && f.endsWith(".json")).sort()
+  // TWO distinct files, one per step -- the deterministic per-host counter
+  // in makeRunner's closure disambiguates the filename.
+  expect(ffufFiles).toEqual(["ffuf-acme.io-1.json", "ffuf-acme.io-2.json"])
+
+  const contents = ffufFiles.map((f) => readFileSync(join(enumDir, f), "utf8"))
+  expect(contents[0]).not.toBe(contents[1])
+  expect(contents[0]).toContain(`ffuf-marker::${targets[0]}`)
+  expect(contents[1]).toContain(`ffuf-marker::${targets[1]}`)
 })
