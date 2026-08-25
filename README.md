@@ -4,7 +4,7 @@
 
 ---
 
-## 🚧 Status: Phase 7 — Resilient Autonomous Scanning
+## 🚧 Status: Phase 8 — Burp MCP Safety Layer
 
 ```
 [0] Foundation & Safety           ██████████ done
@@ -15,7 +15,8 @@
 [4] Verification                  ██████████ done
 [5] Reporting                     ██████████ done
 [6] Orchestrator                  ██████████ done
-[7] Resilient Autonomous Scanning ██████████ done   <- you are here
+[7] Resilient Autonomous Scanning ██████████ done
+[8] Burp MCP Safety Layer         ██████████ done   <- you are here
 ```
 
 **Phase 0 was deliberately zero-attack-capability.** No nmap, nuclei, or sqlmap — just `curl` as a bridge tool for testing. The principle: **fences first, weapons later.** No offensive tool gets installed before the safety layer bounding it is proven by automated tests.
@@ -35,6 +36,8 @@
 **Phase 6 adds orchestration: no new attack tool.** It chains the phases already built — recon → enum → exploit → findings → report — behind one command, `/fullscan`, so an operator (or the agent acting autonomously) doesn't have to run each phase by hand. Nothing about how any individual step is authorized changes: every tool invocation the orchestrator plans still goes through the exact same `bh-exec` choke point every earlier phase already uses, so it can never do anything a manual, phase-by-phase run through `/recon`, `/enum`, `/exploit`, `/verify`, and `/report` couldn't already do. See **Orchestration** below.
 
 **Phase 7 adds resilience: no new attack tool, and no change to what any step is allowed to do.** A long-running `/fullscan` can now survive interruption and transient tool failure: `--resume` continues an interrupted scan from a plain JSON state file instead of starting over, `--max-retries` (opt-in, default `0`) retries a transient tool failure with the exact same bounded `bh-exec` command it already ran, and `--max-steps`/`--max-steps-per-stage` put a hard, safety-positive ceiling on how much autonomous work a single run performs. None of this touches scope, safety, or the `bh-exec` choke point — a scope/safety DENY is still never retried, and a budget only ever reduces work, never grants new capability. See the **Resilience** note under **Orchestration** below.
+
+**Phase 8 extends the safety model to Burp Suite — the one tool that runs *outside* the choke point.** Burp Suite runs on the operator's host machine (Burp Pro for active scan), not inside the engagement container, and when it's connected over MCP its tool calls send their own HTTP requests directly to the target — so, unlike every other tool, a Burp MCP call never passes through `bh-exec`. Because `bh-exec` can't see it, Boundhound enforces a **second, independent choke point**: a PreToolUse scope guard that intercepts every Burp MCP tool call before it runs and scope-checks its target **deny-by-default** — anything with no active scope, an unresolvable or ambiguous target, a suspicious authority, or a target outside `in_scope` is denied and written to the engagement audit log. `bh-burp-scope` additionally mirrors the engagement's `scope.yaml` into Burp's own Target Scope as defense in depth. The enforcement layer (guard + audit + mirror) is live and covered by a real end-to-end test; actually driving Burp over MCP requires the operator's Burp Pro and a wired Burp MCP server, and is validated separately. See **Burp MCP safety** below.
 
 ## Why this exists
 
@@ -74,7 +77,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 597 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 690 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -407,6 +410,47 @@ container, interrupts it partway through, then re-runs the identical
 `--resume` command and confirms the already-completed steps are skipped
 rather than re-executed, end to end.
 
+## Burp MCP safety
+
+Every tool discussed above runs *inside* the engagement container and is
+invoked by Boundhound itself through `bh-exec` — the choke point sees the
+command, checks scope, applies safety caps, and audits it. **Burp Suite is the
+exception.** Burp runs on the operator's host machine (Burp **Pro** for active
+scan), not in the container, and when it's connected over MCP it sends its own
+HTTP requests directly to the target. A Burp MCP tool call therefore **never
+passes through `bh-exec`** — the Bash-level scope guard can't see it.
+
+Rather than trust Burp to stay in scope, Boundhound adds a **second,
+independent choke point** for it:
+
+- **A PreToolUse scope guard for Burp MCP calls.** The guard
+  ([`src/guard/burp-guard.mjs`](src/guard/burp-guard.mjs), wired into
+  [`hooks/scope-guard.mjs`](hooks/scope-guard.mjs)) intercepts every Burp MCP
+  tool call before it runs, extracts its target, and scope-checks it
+  **deny-by-default** against the active engagement. A call is denied — and the
+  denial written to the engagement audit log — when there is no active scope, an
+  unresolvable target, an **ambiguous** target (its candidate fields disagree,
+  e.g. an in-scope `url` alongside an out-of-scope `host`), a **suspicious**
+  authority (backslash/control-character tricks that a host and Burp might parse
+  differently), or a target outside `in_scope`. It reuses the exact same
+  `matchTarget` scope logic every other phase uses, so a Burp call can never
+  reach a target a `bh-exec` call couldn't.
+- **`bh-burp-scope` mirrors `scope.yaml` into Burp's own Target Scope.** Run
+  `node bin/bh-burp-scope.mjs` (or `/burp`) to emit a Burp Target Scope
+  (`output/burp/target-scope.json`) — `in_scope` as include entries, `out_of_scope`
+  as exclude entries, with anchored host regexes — that the operator loads into
+  Burp. This is defense in depth: Burp refuses out-of-scope hosts itself, on top
+  of the guard.
+
+The enforcement layer — guard, audit, and scope mirror — is live and covered by
+a real end-to-end test
+([`test/burp-guard-e2e.test.mjs`](test/burp-guard-e2e.test.mjs)) that drives the
+actual hook subprocess with real Burp-MCP-shaped events and asserts out-of-scope
+is denied + audited while in-scope is allowed. **Actually driving Burp over MCP**
+(Repeater/Scanner) requires the operator's Burp Pro and a wired Burp MCP server,
+and is validated separately — Boundhound does not itself drive Burp yet. The
+`pentest-burp` skill explains the model; `/burp` is the entry point.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -431,7 +475,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 597 pass / 1 skip
+bun test                        # 690 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -454,7 +498,8 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   skills/pentest-verify/   active skill (Phase 4 verify orchestrator: bh-findings -> re-check via bh-exec -> bh-findings)
   skills/pentest-report/   active skill (Phase 5 report orchestrator: bh-report -> read + summarize report.md)
   skills/pentest-workflow/ active skill (Phase 6 fullscan orchestrator: bh-fullscan chains recon -> enum -> exploit -> findings -> report)
-  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify, /report, /fullscan
+  skills/pentest-burp/     active skill (Phase 8 Burp MCP safety model: separate deny-by-default choke point + scope mirror)
+  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify, /report, /fullscan, /burp
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
@@ -465,16 +510,17 @@ bin/
   bh-findings.mjs        consolidates recon/enum/exploit maps + verify rechecks into findings.json
   bh-report.mjs          renders findings.json + scope.yaml (+ audit tally) into report.md
   bh-fullscan.mjs        orchestrator CLI: stages recon -> enum -> exploit -> findings -> report through bh-exec; Phase 7 adds --resume (state in output/fullscan-state.json), --max-retries, --max-steps/--max-steps-per-stage
+  bh-burp-scope.mjs      mirrors scope.yaml into a Burp Target Scope (output/burp/target-scope.json), fail-closed
   bh-container           Docker container lifecycle
 hooks/
-  scope-guard.mjs          blocks bh-exec bypass attempts
+  scope-guard.mjs          blocks bh-exec bypass attempts; also the Burp MCP deny-by-default choke point (Phase 8)
   hooks.json               PreToolUse hook registration (plugin mode, ${CLAUDE_PLUGIN_ROOT})
 src/
   paths.mjs                code root vs data root resolution (plugin vs local-project)
   scope/                   parser + matcher (deny-by-default) + fail-closed resolver
   safety/                  blocks destructive/DoS actions (incl. ffuf/nuclei concurrency & rate caps, sqlmap weaponizing-flag denial + --level/--risk caps)
   catalog/                 tools-catalog.json loader (ToolEntry schema)
-  guard/                   command classification, anti-bypass
+  guard/                   command classification, anti-bypass; burp-guard.mjs: pure Burp MCP scope decision (deny-by-default, fail-closed)
   audit/                   JSONL audit log
   recon/                   recon-map.mjs: normalizes subfinder/httpx/nmap output into recon-map.json
   enum/                    enum-map.mjs: normalizes ffuf/nuclei output into enum-map.json
