@@ -4,7 +4,7 @@
 
 ---
 
-## 🚧 Status: Phase 4 — Verification
+## 🚧 Status: Phase 5 — Reporting
 
 ```
 [0] Foundation & Safety   ██████████ done
@@ -12,8 +12,8 @@
 [1] Recon                 ██████████ done
 [2] Enumeration           ██████████ done
 [3] Exploitation          ██████████ done
-[4] Verification          ██████████ done   <- you are here
-[5] Reporting             ░░░░░░░░░░ not started
+[4] Verification          ██████████ done
+[5] Reporting             ██████████ done   <- you are here
 [6] Orchestrator          ░░░░░░░░░░ not started
 [7] Expansion             ░░░░░░░░░░ not started
 ```
@@ -29,6 +29,8 @@
 **Phase 3 adds exploitation: sqlmap, in a strictly bounded proof-of-vulnerability mode** — confirming a SQL-injection point is real without ever exfiltrating data, gaining a shell, or touching the filesystem. This is the phase where "fences first, weapons later" gets tested against an actual weapon: sqlmap's own dump/shell/file/eval flags are hard-denied by two independent layers before the tool ever runs. See **Exploitation** below.
 
 **Phase 4 adds verification: no new attack tool.** It consolidates the recon/enum/exploit maps into one normalized, severity-scored, de-duplicated `findings.json`, then actively re-verifies every unverified candidate by re-running its own SAME bounded check — nuclei re-fire, httpx re-probe, or nmap re-scan, never escalated, never sqlmap — through the same `bh-exec` choke point. See **Verification** below.
+
+**Phase 5 adds reporting: no new attack tool, and no network access at all.** It renders the verified `findings.json` plus the engagement's `scope.yaml` into a professional markdown `report.md` — executive summary, scope, methodology, findings grouped by severity with per-type remediation guidance, and an audit appendix — through a pure, deterministic renderer that touches no target and never fabricates a finding. See **Reporting** below.
 
 ## Why this exists
 
@@ -68,7 +70,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 425 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 478 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -242,6 +244,72 @@ points the re-check at an out-of-scope target and confirms `bh-exec` DENYs
 it (exit code 2, audit-logged) before nuclei ever runs — exactly the same
 scope enforcement proven for every earlier phase.
 
+## Reporting
+
+Phase 5 adds no new attack tool and makes no network call at all.
+Orchestrated by the self-authored `pentest-report` skill (run via
+`/report`), **`bh-report`** (`bin/bh-report.mjs`) reads the active
+engagement's already-consolidated `output/verify/findings.json` plus its
+`scope.yaml` metadata (and a best-effort ALLOW/DENY tally from
+`audit.log`), and renders all of it into one markdown document,
+`output/report/report.md`.
+
+The rendering itself lives in a **pure** function, `buildReport`
+(`src/report/report.mjs`) — no filesystem or network I/O, so the same
+`findings` + `meta` + `now` always produces byte-identical output, and it
+is unit-tested purely against fixtures. The CLI owns all the I/O: reading
+`findings.json`, loading `scope.yaml` through the same `parseScope` every
+other phase uses, and writing the result.
+
+The report has:
+
+1. **Title and metadata** — engagement name, authorization on record,
+   mode, scope enforcement.
+2. **Executive summary** — a severity-count table (critical → info) and
+   how many findings are independently verified.
+3. **Scope** — in-scope/out-of-scope domains and CIDRs, straight from
+   `scope.yaml`.
+4. **Methodology** — the recon → enum → exploit → verify workflow, and a
+   note that every tool invocation in every phase ran through the enforced
+   `bh-exec` choke point.
+5. **Findings, grouped by severity** (critical → info; empty severities are
+   skipped) — each finding shows its target, confidence, verified status,
+   evidence, and **per-type remediation guidance** (a table-driven lookup
+   for `sqli`/`nuclei`/`open-port`/`http-service`/`content`/`subdomain`,
+   falling back to a generic vulnerability-management line for any
+   unrecognized type).
+6. **Appendix** — an ALLOW/DENY audit-log summary and a pointer to the raw
+   tool output under `output/`.
+
+**It renders only verified engagement data and never fabricates.** Every
+fact in the report — every finding, severity, and piece of evidence —
+comes straight from `findings.json` and `scope.yaml` exactly as those
+files already stand; a missing or unrecognized field renders as an
+explicit placeholder, never a guessed value, and an engagement with no
+findings yet gets a valid, truthful "no findings recorded" report instead
+of invented content.
+
+**`bh-report` fail-closes on a broken scope.** Loading `scope.yaml`
+through `parseScope` can throw — a missing engagement/authorization field,
+an invalid `scope_enforcement` value, a malformed CIDR, and so on. When
+that happens, `bh-report` refuses to write a report at all and exits code
+3, the same deny-by-default posture every other phase uses for a broken
+scope.
+
+**Markdown only in this phase** — no HTML or PDF output, and no CVSS
+scoring; the counts and severities are exactly what `findings.json`
+already carries.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/report-e2e.test.mjs`](test/report-e2e.test.mjs) — which seeds a
+temp engagement's recon/enum/exploit maps via the real
+`buildReconMap`/`buildEnumMap`/`buildExploitMap` builders, then drives the
+real `bh-findings.mjs` → `bh-report.mjs` CLI chain as actual subprocesses
+and asserts the produced `report.md`'s content (metadata, severity counts,
+per-finding sections, remediation text); a second case in the same suite
+points at a broken `scope.yaml` and confirms `bh-report` fails closed
+(exit code 3, no `report.md` written) before it ever reads findings.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -266,7 +334,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 425 pass / 1 skip
+bun test                        # 478 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -287,7 +355,8 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   skills/pentest-enum/     active skill (Phase 2 enum orchestrator: ffuf -> nuclei -> bh-enum-map)
   skills/pentest-exploit/  active skill (Phase 3 exploit orchestrator: sqlmap -> bh-exploit-map, bounded proof-of-vuln)
   skills/pentest-verify/   active skill (Phase 4 verify orchestrator: bh-findings -> re-check via bh-exec -> bh-findings)
-  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify
+  skills/pentest-report/   active skill (Phase 5 report orchestrator: bh-report -> read + summarize report.md)
+  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify, /report
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
@@ -296,6 +365,7 @@ bin/
   bh-enum-map.mjs        merges ffuf/nuclei output into enum-map.json
   bh-exploit-map.mjs     merges sqlmap output into exploit-map.json
   bh-findings.mjs        consolidates recon/enum/exploit maps + verify rechecks into findings.json
+  bh-report.mjs          renders findings.json + scope.yaml (+ audit tally) into report.md
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -311,6 +381,7 @@ src/
   enum/                    enum-map.mjs: normalizes ffuf/nuclei output into enum-map.json
   exploit/                 exploit-map.mjs: normalizes sqlmap output into exploit-map.json
   verify/                  findings.mjs: consolidates recon/enum/exploit maps + applies re-verification into findings.json
+  report/                  report.mjs: pure markdown renderer (findings.json + scope meta -> report.md), no I/O
 docker/
   Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2) + sqlmap (Phase 3)
   wordlists/               bundled wordlist for ffuf content discovery
