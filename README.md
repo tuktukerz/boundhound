@@ -4,7 +4,7 @@
 
 ---
 
-## 🚧 Status: Phase 5 — Reporting
+## 🚧 Status: Phase 6 — Orchestrator
 
 ```
 [0] Foundation & Safety   ██████████ done
@@ -13,8 +13,8 @@
 [2] Enumeration           ██████████ done
 [3] Exploitation          ██████████ done
 [4] Verification          ██████████ done
-[5] Reporting             ██████████ done   <- you are here
-[6] Orchestrator          ░░░░░░░░░░ not started
+[5] Reporting             ██████████ done
+[6] Orchestrator          ██████████ done   <- you are here
 [7] Expansion             ░░░░░░░░░░ not started
 ```
 
@@ -31,6 +31,8 @@
 **Phase 4 adds verification: no new attack tool.** It consolidates the recon/enum/exploit maps into one normalized, severity-scored, de-duplicated `findings.json`, then actively re-verifies every unverified candidate by re-running its own SAME bounded check — nuclei re-fire, httpx re-probe, or nmap re-scan, never escalated, never sqlmap — through the same `bh-exec` choke point. See **Verification** below.
 
 **Phase 5 adds reporting: no new attack tool, and no network access at all.** It renders the verified `findings.json` plus the engagement's `scope.yaml` into a professional markdown `report.md` — executive summary, scope, methodology, findings grouped by severity with per-type remediation guidance, and an audit appendix — through a pure, deterministic renderer that touches no target and never fabricates a finding. See **Reporting** below.
+
+**Phase 6 adds orchestration: no new attack tool.** It chains the phases already built — recon → enum → exploit → findings → report — behind one command, `/fullscan`, so an operator (or the agent acting autonomously) doesn't have to run each phase by hand. Nothing about how any individual step is authorized changes: every tool invocation the orchestrator plans still goes through the exact same `bh-exec` choke point every earlier phase already uses, so it can never do anything a manual, phase-by-phase run through `/recon`, `/enum`, `/exploit`, `/verify`, and `/report` couldn't already do. See **Orchestration** below.
 
 ## Why this exists
 
@@ -70,7 +72,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 478 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 534 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -310,6 +312,66 @@ per-finding sections, remediation text); a second case in the same suite
 points at a broken `scope.yaml` and confirms `bh-report` fails closed
 (exit code 3, no `report.md` written) before it ever reads findings.
 
+## Orchestration (`/fullscan`)
+
+Phase 6 adds no new attack tool. Orchestrated by the self-authored
+`pentest-workflow` skill (run via `/fullscan`), **`bh-fullscan`**
+(`bin/bh-fullscan.mjs`, driven by the pure planner/driver in
+`src/orchestrate/fullscan.mjs`) chains the entire engagement in one pass —
+**recon (subfinder → httpx → nmap) → enum (nuclei → ffuf) → exploit
+(sqlmap) → findings → report** — so the operator doesn't have to run
+`/recon`, `/enum`, `/exploit`, `/verify`, and `/report` by hand, one at a
+time.
+
+**Every tool step still goes through `bh-exec` — the same choke point,
+with no shortcut.** `bh-fullscan` never runs `subfinder`, `httpx`, `nmap`,
+`nuclei`, `ffuf`, or `sqlmap` directly; each one is dispatched through
+`bh-exec` exactly as a manual phase command would — scope-checked,
+safety-capped, audited, and run inside the engagement's container. The
+orchestrator adds no new capability and no new attack surface on top of
+that: it cannot exceed any per-phase bound that already applies when a
+human runs one phase at a time, because it is calling the exact same
+`bh-exec`-gated commands those phases call. A step `bh-exec` denies (out of
+scope, an unsafe flag value, a cap exceeded) is **skipped, not forced** —
+`bh-fullscan` never retries a denied step with a different target or a
+weaker flag set, and a single denial never aborts the rest of the run.
+
+**Target derivation is in-scope-only.** Each stage re-derives its target
+list from whatever the previous stage's map (`recon-map.json` /
+`enum-map.json`) already recorded, filtering every candidate through the
+same `matchTarget` scope check every other phase uses before it is ever
+handed to `bh-exec` — which then re-checks that exact same target
+independently, on every call. Neither layer alone is treated as
+sufficient, and a discovered host that doesn't clear scope is never
+touched.
+
+`bh-fullscan` runs the bounded exploit stage by default. Pass
+**`--no-exploit`** for a non-intrusive run that stops after enumeration —
+recon and enumeration still run in full, `sqlmap` is never invoked, and the
+final report is built from whatever recon and enum found.
+
+**`bh-fullscan` fail-closes on a broken or absent scope.** No active
+engagement, or a `scope.yaml` that fails to load, means the CLI exits code
+3 and runs nothing at all — no tool step, no map, no report — the same
+deny-by-default posture every other phase uses for a broken scope.
+
+A final pair of steps mirrors what a human operator would run last:
+`bh-findings` consolidates every map into `findings.json`, then `bh-report`
+renders the final `engagements/<name>/output/report/report.md`.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/fullscan-e2e.test.mjs`](test/fullscan-e2e.test.mjs) — which spins up
+an actual local target container (nginx) on a real docker network and
+drives the real `node bin/bh-fullscan.mjs --data-dir <tmp> --no-exploit`
+CLI against it, proving the whole staged pipeline (scope-check →
+recon:subfinder/httpx/nmap → enum:nuclei/ffuf → findings → report) end to
+end against a live target, with every tool step still going through the
+same enforced `bh-exec` choke point — exactly as `recon-e2e.test.mjs` /
+`enum-e2e.test.mjs` / `exploit-e2e.test.mjs` / `verify-e2e.test.mjs` /
+`report-e2e.test.mjs` do for their own phases, but here proving a single
+command really does drive an autonomous scan from recon through to a
+written report.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -334,7 +396,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 478 pass / 1 skip
+bun test                        # 534 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -356,7 +418,8 @@ In dev mode, omit `--data-dir` entirely — both scripts fall back to `$CLAUDE_P
   skills/pentest-exploit/  active skill (Phase 3 exploit orchestrator: sqlmap -> bh-exploit-map, bounded proof-of-vuln)
   skills/pentest-verify/   active skill (Phase 4 verify orchestrator: bh-findings -> re-check via bh-exec -> bh-findings)
   skills/pentest-report/   active skill (Phase 5 report orchestrator: bh-report -> read + summarize report.md)
-  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify, /report
+  skills/pentest-workflow/ active skill (Phase 6 fullscan orchestrator: bh-fullscan chains recon -> enum -> exploit -> findings -> report)
+  commands/                /engagement, /mode, /recon, /enum, /exploit, /verify, /report, /fullscan
   settings.json            PreToolUse hook registration (dev/project mode)
 bin/
   bh-exec.mjs            choke point: scope + safety + audit -> docker exec
@@ -366,6 +429,7 @@ bin/
   bh-exploit-map.mjs     merges sqlmap output into exploit-map.json
   bh-findings.mjs        consolidates recon/enum/exploit maps + verify rechecks into findings.json
   bh-report.mjs          renders findings.json + scope.yaml (+ audit tally) into report.md
+  bh-fullscan.mjs        Phase 6 orchestrator CLI: stages recon -> enum -> exploit -> findings -> report through bh-exec
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -382,6 +446,7 @@ src/
   exploit/                 exploit-map.mjs: normalizes sqlmap output into exploit-map.json
   verify/                  findings.mjs: consolidates recon/enum/exploit maps + applies re-verification into findings.json
   report/                  report.mjs: pure markdown renderer (findings.json + scope meta -> report.md), no I/O
+  orchestrate/             fullscan.mjs: pure planner (in-scope target derivation per stage) + staged driver, no I/O
 docker/
   Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2) + sqlmap (Phase 3)
   wordlists/               bundled wordlist for ffuf content discovery
