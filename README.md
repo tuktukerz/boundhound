@@ -1,43 +1,38 @@
 # Boundhound
 
-**A pentest agent for Claude Code with enforced, deny-by-default scope safety.**
+**An autonomous penetration-testing framework for Claude Code — with scope safety that's _enforced_, not requested.**
+
+Boundhound runs a whole engagement from one command — reconnaissance → enumeration → bounded exploitation → verification → reporting — while making it **technically impossible for the agent to touch a target outside your authorized scope.** Enforcement lives in a git-tracked hook and a CLI choke point the agent doesn't control, so scope holds even if the model is confused, jailbroken, or wrong. Most "AI pentest" tools _ask_ the agent to stay in scope; Boundhound removes the choice.
 
 ---
 
-## 🚧 Status: Phase 8 — Burp MCP Safety Layer
+## What you get
 
-```
-[0] Foundation & Safety           ██████████ done
-[0.5] Plugin packaging            ██████████ done
-[1] Recon                         ██████████ done
-[2] Enumeration                   ██████████ done
-[3] Exploitation                  ██████████ done
-[4] Verification                  ██████████ done
-[5] Reporting                     ██████████ done
-[6] Orchestrator                  ██████████ done
-[7] Resilient Autonomous Scanning ██████████ done
-[8] Burp MCP Safety Layer         ██████████ done   <- you are here
-```
+- **🎯 One-command engagements** — `/fullscan` chains recon → enum → exploit → verify → report autonomously, then hands you a submittable `report.md`. Or drive each phase by hand (`/recon`, `/enum`, `/exploit`, `/verify`, `/report`).
+- **🛡️ Enforced deny-by-default scope** — every tool call passes through one choke point (`bh-exec`) that checks it against `scope.yaml` and refuses anything out of scope, before a packet leaves. A `PreToolUse` hook blocks any attempt to bypass it.
+- **🧨 Bounded exploitation** — sqlmap runs in strict proof-of-vulnerability mode; its data-dump, OS-shell, and file-read/write flags are hard-denied by two independent layers before the tool ever starts.
+- **♻️ Resilient autonomous scanning** — a long run survives interruption (`--resume`), retries transient tool failures with the identical bounded command (`--max-retries`), and honors a hard step ceiling (`--max-steps`). A scope/safety denial is never retried.
+- **🔌 A second choke point for Burp Suite** — Burp runs host-side and its MCP calls bypass the container, so a dedicated guard scope-checks every Burp request deny-by-default and mirrors your scope into Burp's own Target Scope.
+- **📚 An 81-skill technique library** — self-authored playbooks across 11 categories (web injection, access control, auth/session, API, recon/OSINT, infra, info-disclosure, business-logic, methodology), each wired to Boundhound's tools and safety model. See [`skills-library/`](skills-library/).
+- **🧾 Everything audited** — every tool run and every denial lands in a per-engagement `audit.log`, so an engagement has a complete chain of custody.
 
-**Phase 0 was deliberately zero-attack-capability.** No nmap, nuclei, or sqlmap — just `curl` as a bridge tool for testing. The principle: **fences first, weapons later.** No offensive tool gets installed before the safety layer bounding it is proven by automated tests.
+## Capabilities at a glance
 
-**Phase 0.5 made that same safety layer installable as a plugin**, so it runs from any project directory instead of only from inside this repo checkout. It changed nothing about the enforcement logic — only *where* it reads code from and writes state to.
+| Area | Tools / commands | Bound |
+|---|---|---|
+| Recon | subfinder · httpx · nmap — `/recon` | deny-by-default scope; nmap non-aggressive |
+| Enumeration | ffuf · nuclei — `/enum` | concurrency & rate caps |
+| Exploitation | sqlmap — `/exploit` | proof-of-vuln only; weaponizing flags denied |
+| Verification | `/verify` | re-runs the SAME bounded check, never escalates |
+| Reporting | `/report` | pure renderer; never fabricates a finding |
+| Orchestration | `/fullscan` | chains all phases; `--resume` / retry / budgets |
+| Burp Suite | `/burp` · `bh-burp-scope` | separate deny-by-default MCP choke point |
 
-**Phase 1 added the first real attack-surface-mapping capability: recon** — subfinder, httpx, and nmap, all running through the same `bh-exec` choke point proven in Phase 0. See **Recon** below.
+Every one of those runs through the same enforced `bh-exec` choke point (or, for Burp, its dedicated guard) — the framework can't do anything a manually-run, scope-checked command couldn't.
 
-**Phase 2 adds enumeration: ffuf and nuclei**, deepening what recon found — still through the same `bh-exec` choke point, with no shortcuts. See **Enumeration** below.
+**Status:** the full pipeline is shipped and green — foundation & safety, plugin packaging, recon, enumeration, bounded exploitation, verification, reporting, the `/fullscan` orchestrator, resilience, and the Burp MCP safety layer are all built, tested, and merged, alongside the 81-skill technique library. It was built **safety-first, one milestone at a time** — every offensive tool was added only after the safety layer bounding it was proven by automated tests ("fences first, weapons later"). Each capability is detailed in its own section below; the phase-by-phase design story and roadmap live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-**Phase 3 adds exploitation: sqlmap, in a strictly bounded proof-of-vulnerability mode** — confirming a SQL-injection point is real without ever exfiltrating data, gaining a shell, or touching the filesystem. This is the phase where "fences first, weapons later" gets tested against an actual weapon: sqlmap's own dump/shell/file/eval flags are hard-denied by two independent layers before the tool ever runs. See **Exploitation** below.
-
-**Phase 4 adds verification: no new attack tool.** It consolidates the recon/enum/exploit maps into one normalized, severity-scored, de-duplicated `findings.json`, then actively re-verifies every unverified candidate by re-running its own SAME bounded check — nuclei re-fire, httpx re-probe, or nmap re-scan, never escalated, never sqlmap — through the same `bh-exec` choke point. See **Verification** below.
-
-**Phase 5 adds reporting: no new attack tool, and no network access at all.** It renders the verified `findings.json` plus the engagement's `scope.yaml` into a professional markdown `report.md` — executive summary, scope, methodology, findings grouped by severity with per-type remediation guidance, and an audit appendix — through a pure, deterministic renderer that touches no target and never fabricates a finding. See **Reporting** below.
-
-**Phase 6 adds orchestration: no new attack tool.** It chains the phases already built — recon → enum → exploit → findings → report — behind one command, `/fullscan`, so an operator (or the agent acting autonomously) doesn't have to run each phase by hand. Nothing about how any individual step is authorized changes: every tool invocation the orchestrator plans still goes through the exact same `bh-exec` choke point every earlier phase already uses, so it can never do anything a manual, phase-by-phase run through `/recon`, `/enum`, `/exploit`, `/verify`, and `/report` couldn't already do. See **Orchestration** below.
-
-**Phase 7 adds resilience: no new attack tool, and no change to what any step is allowed to do.** A long-running `/fullscan` can now survive interruption and transient tool failure: `--resume` continues an interrupted scan from a plain JSON state file instead of starting over, `--max-retries` (opt-in, default `0`) retries a transient tool failure with the exact same bounded `bh-exec` command it already ran, and `--max-steps`/`--max-steps-per-stage` put a hard, safety-positive ceiling on how much autonomous work a single run performs. None of this touches scope, safety, or the `bh-exec` choke point — a scope/safety DENY is still never retried, and a budget only ever reduces work, never grants new capability. See the **Resilience** note under **Orchestration** below.
-
-**Phase 8 extends the safety model to Burp Suite — the one tool that runs *outside* the choke point.** Burp Suite runs on the operator's host machine (Burp Pro for active scan), not inside the engagement container, and when it's connected over MCP its tool calls send their own HTTP requests directly to the target — so, unlike every other tool, a Burp MCP call never passes through `bh-exec`. Because `bh-exec` can't see it, Boundhound enforces a **second, independent choke point**: a PreToolUse scope guard that intercepts every Burp MCP tool call before it runs and scope-checks its target **deny-by-default** — anything with no active scope, an unresolvable or ambiguous target, a suspicious authority, or a target outside `in_scope` is denied and written to the engagement audit log. `bh-burp-scope` additionally mirrors the engagement's `scope.yaml` into Burp's own Target Scope as defense in depth. The enforcement layer (guard + audit + mirror) is live and covered by a real end-to-end test; actually driving Burp over MCP requires the operator's Burp Pro and a wired Burp MCP server, and is validated separately. See **Burp MCP safety** below.
+**Honest about the bounds:** exploitation is proof-of-vulnerability, not weaponization; Boundhound does not drive a Burp scan on its own yet (it enforces the safety layer around Burp MCP, which is validated separately against Burp Pro); and it does not perform mass/credential-flood or denial-of-service attacks — its safety layer caps request rates and denies DoS-shaped activity. It is built for authorized engagements, bug-bounty programs, and your own lab.
 
 ## Why this exists
 
@@ -77,7 +72,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 690 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 1340 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -451,6 +446,25 @@ is denied + audited while in-scope is allowed. **Actually driving Burp over MCP*
 and is validated separately — Boundhound does not itself drive Burp yet. The
 `pentest-burp` skill explains the model; `/burp` is the entry point.
 
+## Skill library
+
+Beyond the curated per-phase skills that drive the pipeline, Boundhound ships a broad **technique-playbook library** under [`skills-library/`](skills-library/) — **81 self-authored skills across 11 categories**:
+
+| Category | Skills | Examples |
+|---|---|---|
+| web-injection | 14 | sqli, xss (reflected/stored/dom), ssrf, ssti, xxe, command-injection |
+| recon-osint | 10 | subdomain-enumeration, dns-recon, tech-fingerprinting, port-service-scanning |
+| web-auth-session | 9 | auth-bypass, jwt-attacks, oauth-misconfig, mfa-bypass |
+| web-access-control | 8 | idor, broken-access-control, path-traversal, lfi/rfi |
+| api | 8 | graphql-attacks, mass-assignment, bola/bfla, swagger-openapi-recon |
+| web-client | 7 | csrf, cors-misconfig, open-redirect, prototype-pollution |
+| infra-network | 7 | smb/snmp/ftp enumeration, ssl-tls-audit, service-version-audit |
+| info-disclosure | 7 | exposed-git, backup-file-discovery, source-map-exposure |
+| business-logic | 4 | race-condition, workflow-bypass, price-parameter-tampering |
+| methodology | 6 | bug-bounty-workflow, recon-methodology, severity-triage, report-writeup |
+
+Each playbook is written from scratch in our own words and **wired to Boundhound's real system** — it names the bounded tool(s) and phase command(s) it uses, and where a technique has no bounded tool yet, it says so and gives the safe, in-scope path rather than implying a capability that doesn't exist. Every skill is machine-validated by `test/skill-library.test.mjs` (valid frontmatter, no external references, English-only, genuine Boundhound wiring). These are **source playbooks** — a coverage map and reference; the active per-phase skills under `.claude/skills/` are promoted deliberately, not auto-loaded.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -475,7 +489,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 690 pass / 1 skip
+bun test                        # 1340 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -532,7 +546,7 @@ src/
 docker/
   Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2) + sqlmap (Phase 3)
   wordlists/               bundled wordlist for ffuf content discovery
-skills-library/            authored skill library (promoted to active per phase)
+skills-library/            81-skill self-authored technique-playbook library (11 categories); see skills-library/README.md
 docs/
   ARCHITECTURE.md          big-picture map & 8 phases
   specs/, plans/           spec & implementation plan per phase
