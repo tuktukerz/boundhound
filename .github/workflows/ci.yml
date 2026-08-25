@@ -1,0 +1,59 @@
+name: CI
+
+# Review gate: runs on every pull request and on pushes to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. a new push to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Required gate — deterministic unit + integration tests (no Docker), fast.
+  # The Docker-backed e2e tests self-skip when the Docker daemon is
+  # unavailable (`test.skipIf(!dockerAvailable())`), so we stop Docker here to
+  # keep this check quick and non-flaky. The real e2e run in the `e2e` job
+  # below and locally.
+  test:
+    name: test (unit + integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Stop Docker so the container e2e self-skip
+        run: sudo systemctl stop docker.socket docker.service || true
+      - name: Run the suite
+        run: bun test
+
+  # Optional, non-required — the real end-to-end proof. Builds the bh:base tool
+  # image and runs the pentest tools in real containers through the actual
+  # bh-exec choke point. Heavier (image build + tool downloads); keep this out
+  # of the required branch-protection checks so a transient build/network issue
+  # never blocks a merge.
+  e2e:
+    name: docker e2e (real containers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Run the real end-to-end tests (Docker available)
+        run: >
+          bun test
+          test/recon-e2e.test.mjs
+          test/enum-e2e.test.mjs
+          test/exploit-e2e.test.mjs
+          test/verify-e2e.test.mjs
+          test/report-e2e.test.mjs
+          test/fullscan-e2e.test.mjs
+          test/fullscan-resilience-e2e.test.mjs
+          test/plugin-e2e.test.mjs
+          test/burp-guard-e2e.test.mjs
