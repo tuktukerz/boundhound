@@ -240,10 +240,47 @@ test.skipIf(!available)(
     expect(report).toContain("http-service")
     expect(report).toContain("open-port")
 
-    // --- 3. real --no-exploit wiring: sqlmap never ran ---
+    // --- 3. real enum-map.json: ffuf's real content-discovery hit flowed
+    // all the way through enum:ffuf's synth stage (bh-enum-map.mjs), not
+    // just an ALLOW in the audit trail. Mirrors test/enum-e2e.test.mjs's own
+    // enum-map assertions (its "real bh-enum-map merges..." step) -- except
+    // the target here is the orchestrator-PLANNED ffuf run: targetsForStage
+    // ("enum:ffuf", ...) in src/orchestrate/fullscan.mjs builds
+    // "<http_service_url>/FUZZ" off the very http-service already asserted
+    // on above, not a hand-built target string.
+    //
+    // "index.html" is the one deterministic hit available against a stock
+    // nginx:alpine container: it is nginx's actual docroot file (served for
+    // "/" as "Welcome to nginx!"), it is the literal first line of the
+    // bundled wordlist (docker/wordlists/common.txt), and status 200 is
+    // always in the orchestrator's -mc allow-list for enum:ffuf -- so this
+    // reproduces on every real run, unlike other wordlist entries which may
+    // or may not exist on this image. This is not a guess: a real captured
+    // run produced exactly this hit (path "index.html", status 200) -- see
+    // .superpowers/sdd/2026-08-25-fase-6-orchestrator/task-4-report.md.
+    const enumMapPath = join(outputDir, "enum", "enum-map.json")
+    expect(existsSync(enumMapPath)).toBe(true)
+    const enumMap = JSON.parse(readFileSync(enumMapPath, "utf8"))
+
+    expect(Array.isArray(enumMap.content)).toBe(true)
+    const contentHit = enumMap.content.find((c) => c.path === "index.html" && c.status === 200)
+    expect(contentHit).toBeTruthy()
+    expect(contentHit.host).toBe(TARGET_FQDN)
+    expect(contentHit.url).toBe(`http://${TARGET_FQDN}/index.html`)
+
+    // --- 4. real report.md: the SAME ffuf content hit above (carried
+    // through bh-findings.mjs's enumFindings() into a "content" finding)
+    // reached the rendered Findings section, not just enum-map.json on
+    // disk -- proving the whole recon+enum -> findings -> report chain
+    // carries ffuf's real output through, exactly like the http-service/
+    // open-port assertions already made against this same report above.
+    expect(report).toContain("content")
+    expect(report).toContain(`http://${TARGET_FQDN}/index.html`)
+
+    // --- 5. real --no-exploit wiring: sqlmap never ran ---
     expect(existsSync(join(outputDir, "exploit"))).toBe(false)
 
-    // --- 4. real audit.log: in-scope ALLOWs, zero DENYs / out-of-scope contact ---
+    // --- 6. real audit.log: in-scope ALLOWs, zero DENYs / out-of-scope contact ---
     const auditPath = join(dataDir, "engagements", ENG_NAME, "audit.log")
     expect(existsSync(auditPath)).toBe(true)
     const auditLines = readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean)
