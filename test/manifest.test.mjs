@@ -44,12 +44,14 @@ test("hooks/hooks.json PreToolUse command references ${CLAUDE_PLUGIN_ROOT}", () 
   expect(commands.some((cmd) => cmd.includes("${CLAUDE_PLUGIN_ROOT}"))).toBe(true)
 })
 
-test("hooks/hooks.json PreToolUse matcher is the exact full Phase-0 tool set", () => {
+test("hooks/hooks.json PreToolUse matcher is the exact full tool set (core + Burp MCP)", () => {
   const hooks = readJson("hooks/hooks.json")
   const matchers = hooks.hooks.PreToolUse.map((entry) => entry.matcher)
   // Exact-match (not .includes) so a future narrowing of the matcher — e.g.
-  // dropping to just "WebFetch" — fails loudly instead of passing silently.
-  expect(matchers.some((m) => m === "Bash|WebFetch|WebSearch|Write|Edit")).toBe(true)
+  // dropping to just "WebFetch", or losing the Burp MCP arm — fails loudly
+  // instead of passing silently. The `mcp__.*[Bb]urp.*` arm (Phase 8) routes
+  // Burp MCP tool calls through the scope guard (deny-by-default choke point).
+  expect(matchers.some((m) => m === "Bash|WebFetch|WebSearch|Write|Edit|mcp__.*[Bb]urp.*")).toBe(true)
 })
 
 // Cross-check parity: dev-mode (.claude/settings.json, $CLAUDE_PROJECT_DIR)
