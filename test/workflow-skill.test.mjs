@@ -151,6 +151,55 @@ test("pentest-workflow/SKILL.md states a step bh-exec denies is skipped, not for
   expect(text).toMatch(/skipped,?\s+not forced/i)
 })
 
+// --- Phase 7 resilience: --resume / --max-retries / --max-steps -----------
+//
+// spec §5, this task's own scope: document the three new bh-fullscan flags
+// truthfully, in our own words, without changing any Phase-6 safety
+// statement already asserted above. The three load-bearing claims: (1) a
+// retry re-runs the IDENTICAL bounded command, never a relaxed one; (2) a
+// DENY is never retried, exactly like the Phase-6 "skipped, not forced"
+// story; (3) a budget only ever caps/reduces work, never expands it.
+
+test("pentest-workflow/SKILL.md documents --resume for continuing an interrupted scan", () => {
+  const text = readFileSync(skillPath, "utf8")
+  expect(text).toMatch(/--resume/)
+  expect(text).toMatch(/fullscan-state\.json/)
+})
+
+test("pentest-workflow/SKILL.md documents --max-retries and the bounded backoff", () => {
+  const text = readFileSync(skillPath, "utf8")
+  expect(text).toMatch(/--max-retries/)
+})
+
+test("pentest-workflow/SKILL.md documents --max-steps / --max-steps-per-stage as a hard ceiling", () => {
+  const text = readFileSync(skillPath, "utf8")
+  expect(text).toMatch(/--max-steps\b/)
+  expect(text).toMatch(/--max-steps-per-stage/)
+})
+
+test("pentest-workflow/SKILL.md states a retry re-runs the identical bounded command, never a relaxed one", () => {
+  const text = readFileSync(skillPath, "utf8")
+  expect(text).toMatch(/identical/i)
+  expect(text).toMatch(/never (relax|loosen|weaken)/i)
+})
+
+test("pentest-workflow/SKILL.md states a DENY is never retried", () => {
+  const text = readFileSync(skillPath, "utf8")
+  expect(text).toMatch(/DENY is never retried/i)
+})
+
+test("pentest-workflow/SKILL.md states a budget only ever reduces/caps work, never expands it", () => {
+  const text = readFileSync(skillPath, "utf8")
+  expect(text).toMatch(/never expand/i)
+})
+
+test("/fullscan command mentions --resume, --max-retries, and --max-steps", () => {
+  const text = readFileSync(fullscanCmdPath, "utf8")
+  expect(text).toMatch(/--resume/)
+  expect(text).toMatch(/--max-retries/)
+  expect(text).toMatch(/--max-steps\b/)
+})
+
 // --- /fullscan command ---
 
 test("/fullscan command file exists with a <command-instruction> block", () => {

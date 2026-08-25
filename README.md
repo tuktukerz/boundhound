@@ -4,18 +4,18 @@
 
 ---
 
-## 🚧 Status: Phase 6 — Orchestrator
+## 🚧 Status: Phase 7 — Resilient Autonomous Scanning
 
 ```
-[0] Foundation & Safety   ██████████ done
-[0.5] Plugin packaging    ██████████ done
-[1] Recon                 ██████████ done
-[2] Enumeration           ██████████ done
-[3] Exploitation          ██████████ done
-[4] Verification          ██████████ done
-[5] Reporting             ██████████ done
-[6] Orchestrator          ██████████ done   <- you are here
-[7] Expansion             ░░░░░░░░░░ not started
+[0] Foundation & Safety           ██████████ done
+[0.5] Plugin packaging            ██████████ done
+[1] Recon                         ██████████ done
+[2] Enumeration                   ██████████ done
+[3] Exploitation                  ██████████ done
+[4] Verification                  ██████████ done
+[5] Reporting                     ██████████ done
+[6] Orchestrator                  ██████████ done
+[7] Resilient Autonomous Scanning ██████████ done   <- you are here
 ```
 
 **Phase 0 was deliberately zero-attack-capability.** No nmap, nuclei, or sqlmap — just `curl` as a bridge tool for testing. The principle: **fences first, weapons later.** No offensive tool gets installed before the safety layer bounding it is proven by automated tests.
@@ -33,6 +33,8 @@
 **Phase 5 adds reporting: no new attack tool, and no network access at all.** It renders the verified `findings.json` plus the engagement's `scope.yaml` into a professional markdown `report.md` — executive summary, scope, methodology, findings grouped by severity with per-type remediation guidance, and an audit appendix — through a pure, deterministic renderer that touches no target and never fabricates a finding. See **Reporting** below.
 
 **Phase 6 adds orchestration: no new attack tool.** It chains the phases already built — recon → enum → exploit → findings → report — behind one command, `/fullscan`, so an operator (or the agent acting autonomously) doesn't have to run each phase by hand. Nothing about how any individual step is authorized changes: every tool invocation the orchestrator plans still goes through the exact same `bh-exec` choke point every earlier phase already uses, so it can never do anything a manual, phase-by-phase run through `/recon`, `/enum`, `/exploit`, `/verify`, and `/report` couldn't already do. See **Orchestration** below.
+
+**Phase 7 adds resilience: no new attack tool, and no change to what any step is allowed to do.** A long-running `/fullscan` can now survive interruption and transient tool failure: `--resume` continues an interrupted scan from a plain JSON state file instead of starting over, `--max-retries` (opt-in, default `0`) retries a transient tool failure with the exact same bounded `bh-exec` command it already ran, and `--max-steps`/`--max-steps-per-stage` put a hard, safety-positive ceiling on how much autonomous work a single run performs. None of this touches scope, safety, or the `bh-exec` choke point — a scope/safety DENY is still never retried, and a budget only ever reduces work, never grants new capability. See the **Resilience** note under **Orchestration** below.
 
 ## Why this exists
 
@@ -72,7 +74,7 @@ User / Agent
 All of this is verified by [`test/acceptance.test.mjs`](test/acceptance.test.mjs) and [`test/plugin-e2e.test.mjs`](test/plugin-e2e.test.mjs) — not a claim, there's proof:
 
 ```bash
-bun test   # 534 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
+bun test   # 597 pass · 1 skip (Docker smoke, needs a live container) · 0 fail
 ```
 
 ## Recon
@@ -372,6 +374,39 @@ same enforced `bh-exec` choke point — exactly as `recon-e2e.test.mjs` /
 command really does drive an autonomous scan from recon through to a
 written report.
 
+**Resilience: `--resume`, `--max-retries`, `--max-steps`.** Phase 7 adds no
+new attack tool and changes nothing about what any individual step is
+allowed to do — it only makes a long-running `bh-fullscan` more resilient to
+interruption and transient tool failure.
+
+- **`--resume`** continues an interrupted scan instead of starting over: a
+  plain state file, `engagements/<name>/output/fullscan-state.json`, records
+  which stage/tool/target steps already completed, and re-running the same
+  command with `--resume` skips every step already marked done and picks up
+  from wherever the run stopped.
+- **`--max-retries N`** (default `0`, opt-in) retries a **transient** tool
+  failure — a crash, a network blip, any non-zero exit that isn't a
+  scope/safety DENY — up to `N` times, with a bounded backoff between
+  attempts. Every retry re-runs the **identical bounded `bh-exec` command**:
+  same tool, same target, same flags already dispatched the first time — it
+  never relaxes a bound, widens a target, or otherwise "tries harder." A
+  scope/safety **DENY is never retried**: it's a final decision, not a
+  transient failure, so it is skipped exactly as before `--max-retries`
+  existed.
+- **`--max-steps N`** / **`--max-steps-per-stage N`** cap the whole run /
+  a single stage at a hard number of tool steps. Both are safety-positive
+  bounds — they only ever **reduce** how much autonomous work a run
+  performs, never expand it; the run still finishes findings + report from
+  whatever it collected before the budget was hit. Omitting all three flags
+  runs exactly as Phase 6 already did.
+
+This is proven by a real, non-mocked end-to-end test —
+[`test/fullscan-resilience-e2e.test.mjs`](test/fullscan-resilience-e2e.test.mjs)
+— which runs a real `bh-fullscan.mjs --resume` against a live target
+container, interrupts it partway through, then re-runs the identical
+`--resume` command and confirms the already-completed steps are skipped
+rather than re-executed, end to end.
+
 ## Install as a Claude Code plugin
 
 ```
@@ -396,7 +431,7 @@ The alternative to installing as a plugin: clone the repo and run everything loc
 
 ```bash
 bun install
-bun test                        # 534 pass / 1 skip
+bun test                        # 597 pass / 1 skip
 
 bin/bh-container up smoke     # start the tool container
 node bin/bh-engagement.mjs acme   # scaffold a new engagement -> fill in scope.yaml
@@ -429,7 +464,7 @@ bin/
   bh-exploit-map.mjs     merges sqlmap output into exploit-map.json
   bh-findings.mjs        consolidates recon/enum/exploit maps + verify rechecks into findings.json
   bh-report.mjs          renders findings.json + scope.yaml (+ audit tally) into report.md
-  bh-fullscan.mjs        Phase 6 orchestrator CLI: stages recon -> enum -> exploit -> findings -> report through bh-exec
+  bh-fullscan.mjs        orchestrator CLI: stages recon -> enum -> exploit -> findings -> report through bh-exec; Phase 7 adds --resume (state in output/fullscan-state.json), --max-retries, --max-steps/--max-steps-per-stage
   bh-container           Docker container lifecycle
 hooks/
   scope-guard.mjs          blocks bh-exec bypass attempts
@@ -447,6 +482,7 @@ src/
   verify/                  findings.mjs: consolidates recon/enum/exploit maps + applies re-verification into findings.json
   report/                  report.mjs: pure markdown renderer (findings.json + scope meta -> report.md), no I/O
   orchestrate/             fullscan.mjs: pure planner (in-scope target derivation per stage) + staged driver, no I/O
+                           run-state.mjs: pure resume-state model (stepKey/isDone/markDone/parseState/serializeState) backing `--resume`, no I/O
 docker/
   Dockerfile               multi-stage image — nmap, subfinder, httpx (Phase 1) + ffuf, nuclei (Phase 2) + sqlmap (Phase 3)
   wordlists/               bundled wordlist for ffuf content discovery

@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { activeName, loadActiveConfig } from "../src/scope/active-engagement.mjs"
 import { runFullscan as runFullscanCore } from "../src/orchestrate/fullscan.mjs"
+import { emptyState, parseState, serializeState } from "../src/orchestrate/run-state.mjs"
 import { codeRoot, dataRoot } from "../src/paths.mjs"
 
 // Which output file a tool's captured stdout is written into, and how
@@ -98,7 +99,13 @@ function safeFilenamePart(s) {
 // aborts the rest of the scan (runFullscan already treats a throw the same
 // way, but there is nothing exceptional about a bh-exec DENY: it is the
 // system working as designed).
-function makeRunner({ codeDir, dataDir, name, spawn, log }) {
+//
+// Phase 7 (spec §4): now RETURNS `{status}` so the driver (runFullscanCore)
+// can classify the outcome for resume/retry -- exit 0 -> "ok", exit 2
+// (DENY) -> "denied", any other nonzero exit or spawn error -> "transient".
+// This is purely an added return value: the DENY log-and-skip and the
+// output-capture-only-on-exit-0 behavior are both unchanged from before.
+export function makeRunner({ codeDir, dataDir, name, spawn, log }) {
   // Deterministic per-run, per-host counter for ffuf's output filename (the
   // only tool that keeps "write" mode -- its JSON output can't be
   // concatenated). A plain Map held in this closure, incremented once per
@@ -114,17 +121,17 @@ function makeRunner({ codeDir, dataDir, name, spawn, log }) {
 
     if (code === 2) {
       log(`stage ${stage}: DENY ${tool} ${target}`)
-      return
+      return { status: "denied" }
     }
     if (code !== 0) {
       log(`stage ${stage}: ${tool} ${target} exited ${code}, skipping output capture`)
-      return
+      return { status: "transient" }
     }
 
     const rule = OUTPUT_RULES[tool]
     if (!rule) {
       log(`stage ${stage}: no known output file for tool '${tool}', discarding stdout`)
-      return
+      return { status: "ok" }
     }
 
     const outDir = join(dataDir, "engagements", name, "output", rule.dir)
@@ -147,6 +154,7 @@ function makeRunner({ codeDir, dataDir, name, spawn, log }) {
       writeFileSync(outPath, stdout)
     }
     log(`stage ${stage}: ${tool} ${target} -> ${outPath}`)
+    return { status: "ok" }
   }
 }
 
@@ -189,12 +197,70 @@ function makeLoadMaps({ dataDir, name }) {
   })
 }
 
+// The real `loadState`/`saveState` (spec §4): the resume state file lives at
+// engagements/<active>/output/fullscan-state.json, a sibling of the
+// recon/enum/exploit output subdirectories makeRunner writes into. Both
+// directions defer their tolerance entirely to run-state.mjs's own
+// parseState/serializeState (Task 1) -- a missing or malformed file must
+// resume as "nothing done yet", never throw and abort the very scan it
+// exists to make resumable.
+function statePath(dataDir, name) {
+  return join(dataDir, "engagements", name, "output", "fullscan-state.json")
+}
+
+function makeLoadState({ dataDir, name }) {
+  const path = statePath(dataDir, name)
+  return () => {
+    if (!existsSync(path)) return emptyState()
+    try {
+      return parseState(readFileSync(path, "utf8"))
+    } catch {
+      return emptyState()
+    }
+  }
+}
+
+function makeSaveState({ dataDir, name }) {
+  const outDir = join(dataDir, "engagements", name, "output")
+  const path = statePath(dataDir, name)
+  return (state) => {
+    mkdirSync(outDir, { recursive: true })
+    writeFileSync(path, serializeState(state))
+  }
+}
+
+// The real `sleep` (spec §4): setTimeout-based, injectable purely so tests
+// never actually wait. Backoff is bounded exponential with NO random jitter
+// (this codebase forbids Math.random() -- see makeRunner's ffufStepCounts
+// comment above for why) so a given attempt number always yields the exact
+// same delay, forever.
+const RETRY_BASE_MS = 500
+const RETRY_CAP_MS = 8000
+
+function realSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function backoff(attempt) {
+  return Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_CAP_MS)
+}
+
 // runFullscan (CLI level): fail-closed on no active engagement / broken
 // scope via loadActiveConfig (spec §3) -- on throw, return code 3 and run
 // NOTHING (no runner/synth/loadMaps is ever constructed, let alone called).
 // `spawn` is injectable (defaults to node:child_process's spawnSync) purely
 // for testability -- production always uses the real one.
-export async function runFullscan({ dataDir, exploit = true, spawn = spawnSync, log } = {}) {
+export async function runFullscan({
+  dataDir,
+  exploit = true,
+  spawn = spawnSync,
+  log,
+  resume = false,
+  maxRetries = 0,
+  maxSteps,
+  maxStepsPerStage,
+  sleep = realSleep,
+} = {}) {
   const dDir = dataDir ?? dataRoot()
   const cDir = codeRoot()
 
@@ -211,8 +277,22 @@ export async function runFullscan({ dataDir, exploit = true, spawn = spawnSync, 
   const runner = makeRunner({ codeDir: cDir, dataDir: dDir, name, spawn, log: doLog })
   const synth = makeSynth({ codeDir: cDir, dataDir: dDir, spawn, log: doLog })
   const loadMaps = makeLoadMaps({ dataDir: dDir, name })
+  const loadState = makeLoadState({ dataDir: dDir, name })
+  const saveState = makeSaveState({ dataDir: dDir, name })
 
-  const summary = await runFullscanCore({ runner, synth, loadMaps, scope: cfg, log: doLog }, { exploit })
+  // Budget fields are only ever set when the corresponding flag was actually
+  // passed -- runFullscanCore gates every budget check on `typeof === "number"`,
+  // so an omitted field (rather than e.g. undefined explicitly assigned) is
+  // what keeps a caller that passes neither flag byte-for-byte identical to
+  // today's unbounded run.
+  const budget = {}
+  if (typeof maxSteps === "number") budget.maxSteps = maxSteps
+  if (typeof maxStepsPerStage === "number") budget.maxStepsPerStage = maxStepsPerStage
+
+  const summary = await runFullscanCore(
+    { runner, synth, loadMaps, loadState, saveState, sleep, scope: cfg, log: doLog },
+    { exploit, resume, retry: { maxRetries, backoff }, budget }
+  )
 
   const reportPath = join(dDir, "engagements", name, "output", "report", "report.md")
   return { code: 0, message: `fullscan complete -> ${reportPath}`, summary, path: reportPath }
@@ -223,7 +303,16 @@ export async function runFullscan({ dataDir, exploit = true, spawn = spawnSync, 
 // since ${CLAUDE_PLUGIN_DATA} isn't exported to the agent's Bash tool
 // session) plus an optional "--no-exploit" flag (spec §3) that disables the
 // exploit:sqlmap stage for a fully non-intrusive recon+enum+report run.
-function extractFlags(argv) {
+//
+// Phase 7 resilience (spec §4) adds four more flags, parsed the same style:
+//   --resume                  bool, same shape as --no-exploit
+//   --max-retries N           number, default 0 (today's single-attempt)
+//   --max-steps N             number, no default -- absent means "no budget"
+//   --max-steps-per-stage N   number, same "absent means no budget" rule
+// maxSteps/maxStepsPerStage are left `undefined` (not defaulted to a number)
+// when the flag isn't given, because runFullscan (CLI level) only sets a
+// budget field when it sees a real number -- see its own comment.
+export function extractFlags(argv) {
   let rest = argv
   let dataDir = null
 
@@ -240,7 +329,61 @@ function extractFlags(argv) {
     rest = [...rest.slice(0, nei), ...rest.slice(nei + 1)]
   }
 
-  return { dataDir, noExploit, rest }
+  let resume = false
+  const ri = rest.indexOf("--resume")
+  if (ri >= 0) {
+    resume = true
+    rest = [...rest.slice(0, ri), ...rest.slice(ri + 1)]
+  }
+
+  let maxRetries = 0
+  const mri = rest.indexOf("--max-retries")
+  if (mri >= 0) {
+    const n = Number(rest[mri + 1])
+    if (Number.isFinite(n)) {
+      maxRetries = n
+      rest = [...rest.slice(0, mri), ...rest.slice(mri + 2)]
+    } else {
+      // The value token is missing or not a valid number -- e.g. the flag
+      // was the last argv token, or the "value" is actually the NEXT
+      // recognized flag (a caller typo like "--max-retries --max-steps 5").
+      // Strip ONLY the flag itself so that next flag's own token is never
+      // eaten by this one's slice(idx, idx+2) -- swallowing it would
+      // silently leave --max-steps (a safety-positive run-budget ceiling)
+      // unset with no indication anything went wrong, which is worse than
+      // just ignoring this malformed flag loudly.
+      process.stderr.write("warning: --max-retries given without a valid numeric value; ignoring\n")
+      rest = [...rest.slice(0, mri), ...rest.slice(mri + 1)]
+    }
+  }
+
+  let maxSteps
+  const msi = rest.indexOf("--max-steps")
+  if (msi >= 0) {
+    const n = Number(rest[msi + 1])
+    if (Number.isFinite(n)) {
+      maxSteps = n
+      rest = [...rest.slice(0, msi), ...rest.slice(msi + 2)]
+    } else {
+      process.stderr.write("warning: --max-steps given without a valid numeric value; ignoring\n")
+      rest = [...rest.slice(0, msi), ...rest.slice(msi + 1)]
+    }
+  }
+
+  let maxStepsPerStage
+  const mspsi = rest.indexOf("--max-steps-per-stage")
+  if (mspsi >= 0) {
+    const n = Number(rest[mspsi + 1])
+    if (Number.isFinite(n)) {
+      maxStepsPerStage = n
+      rest = [...rest.slice(0, mspsi), ...rest.slice(mspsi + 2)]
+    } else {
+      process.stderr.write("warning: --max-steps-per-stage given without a valid numeric value; ignoring\n")
+      rest = [...rest.slice(0, mspsi), ...rest.slice(mspsi + 1)]
+    }
+  }
+
+  return { dataDir, noExploit, resume, maxRetries, maxSteps, maxStepsPerStage, rest }
 }
 
 // CLI entry: import.meta.main is a Bun/Deno-ism and undefined under Node, so
@@ -248,8 +391,8 @@ function extractFlags(argv) {
 // other bin (bh-exec.mjs / bh-report.mjs / bh-recon-map.mjs / ...).
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
 if (isMain) {
-  const { dataDir, noExploit } = extractFlags(process.argv.slice(2))
-  runFullscan({ dataDir: dataDir ?? undefined, exploit: !noExploit })
+  const { dataDir, noExploit, resume, maxRetries, maxSteps, maxStepsPerStage } = extractFlags(process.argv.slice(2))
+  runFullscan({ dataDir: dataDir ?? undefined, exploit: !noExploit, resume, maxRetries, maxSteps, maxStepsPerStage })
     .then((r) => {
       if (r.message) process.stderr.write(r.message + "\n")
       process.exit(r.code)

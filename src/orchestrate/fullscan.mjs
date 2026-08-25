@@ -17,6 +17,7 @@
 // whole scan.
 
 import { matchTarget } from "../scope/scope-matcher.mjs"
+import { stepKey, emptyState, isDone, markDone } from "./run-state.mjs"
 
 const STAGE_ORDER = ["recon:subfinder", "recon:httpx", "recon:nmap", "enum:nuclei", "enum:ffuf", "exploit:sqlmap"]
 
@@ -209,26 +210,87 @@ function errMessage(err) {
   return err && err.message ? err.message : String(err)
 }
 
+// Classifies a runner's resolved return value into the outcome vocabulary
+// resume/retry key off. A throw is classified by the caller (always
+// "transient", per spec §3) -- this only handles what the runner RETURNS:
+// today's void/undefined runner (and any object with no string `status`,
+// e.g. the old `{ok:true}` shape some mocks used) -> "ok"; an explicit
+// `{status}` -> that status verbatim. This is the entire backward-compat
+// seam: nothing here can turn a today-shaped return into anything other
+// than "ok".
+function classifyResult(result) {
+  if (result && typeof result === "object" && typeof result.status === "string") return result.status
+  return "ok"
+}
+
 // Injectable staged driver: sequences the fixed stage order, deriving each
 // stage's steps fresh from `loadMaps()` + `scope`, running each through
 // `runner`, then rebuilding the relevant map via `synth`. Finishes with
 // `synth("findings")` then `synth("report")`. NEVER throws overall -- every
 // per-step/per-stage failure (a throwing runner, a throwing synth/loadMaps)
 // is caught, logged via `log`, and treated as skipped, not fatal.
+//
+// Phase 7 resilience (spec §3) layers three OPTIONAL, independently-off-by-
+// default behaviors on top of the Phase 6 shape above, none of which change
+// a single observable behavior when the caller passes none of them:
+//   - resume: `loadState`/`saveState` + `stepKey`/`isDone`/`markDone` (Task
+//     1's pure model) let an interrupted scan skip already-completed steps
+//     on a later run. Off (`resume` falsy) means `loadState`/`saveState` are
+//     NEVER called and every step is treated as not-done, i.e. today.
+//   - retry: a runner outcome classified "transient" (a throw, or an
+//     explicit `{status:"transient"}`) is retried up to `retry.maxRetries`
+//     times with an injected `sleep(retry.backoff(attempt))` between
+//     attempts; `maxRetries` defaults to 0, i.e. today's single attempt.
+//     "denied" and "ok" are terminal outcomes and are never retried.
+//   - budget: an optional hard ceiling (`maxSteps` across the whole run,
+//     `maxStepsPerStage` per stage) on how many steps are actually RUN
+//     (never on resumed-skips). Reaching `maxSteps` stops all further
+//     planning/running immediately (findings+report still run at the end);
+//     reaching `maxStepsPerStage` just moves on to the next stage.
 export async function runFullscan(deps = {}, opts = {}) {
   const { runner, synth, loadMaps, scope } = deps ?? {}
   const doLog = typeof deps?.log === "function" ? deps.log : () => {}
   const doRunner = typeof runner === "function" ? runner : async () => {}
   const doSynth = typeof synth === "function" ? synth : async () => {}
   const doLoadMaps = typeof loadMaps === "function" ? loadMaps : () => ({})
+  const doLoadState = typeof deps?.loadState === "function" ? deps.loadState : async () => emptyState()
+  const doSaveState = typeof deps?.saveState === "function" ? deps.saveState : async () => {}
+  const doSleep = typeof deps?.sleep === "function" ? deps.sleep : async () => {}
   const exploit = opts?.exploit
+  const resume = Boolean(opts?.resume)
+  const maxRetries = typeof opts?.retry?.maxRetries === "number" ? opts.retry.maxRetries : 0
+  const backoff = typeof opts?.retry?.backoff === "function" ? opts.retry.backoff : () => 0
+  const budget = opts?.budget
 
-  const summary = { stages: [], reportGenerated: false, toolsRun: 0 }
+  const summary = { stages: [], reportGenerated: false, toolsRun: 0, resumedSkipped: 0, retried: 0, budgetStopped: false }
+
+  // Loaded once, up front, ONLY when resuming -- per spec §3, a non-resume
+  // run never touches loadState/saveState at all, matching today exactly.
+  let state = emptyState()
+  if (resume) {
+    try {
+      state = (await doLoadState()) ?? emptyState()
+    } catch (err) {
+      doLog(`resume: loadState failed, starting fresh: ${errMessage(err)}`)
+      state = emptyState()
+    }
+  }
+
+  let stepsRun = 0 // budget.maxSteps counter -- steps actually RUN this invocation, never resumed-skips
 
   try {
     const stages = STAGE_ORDER.filter((stage) => exploit !== false || stage !== "exploit:sqlmap")
 
-    for (const stage of stages) {
+    outerStages: for (const stage of stages) {
+      // Checked at the top of every stage too (not just mid-stage below) so
+      // that once the run budget is exhausted, later stages are never even
+      // planned (loadMaps/targetsForStage skipped entirely for them).
+      if (typeof budget?.maxSteps === "number" && stepsRun >= budget.maxSteps) {
+        doLog(`budget: maxSteps reached, stopping further stages`)
+        summary.budgetStopped = "maxSteps"
+        break outerStages
+      }
+
       let maps = {}
       try {
         maps = (await doLoadMaps()) ?? {}
@@ -250,12 +312,82 @@ export async function runFullscan(deps = {}, opts = {}) {
       }
 
       doLog(`stage ${stage}: running ${steps.length} step(s)`)
+      let stepsThisStage = 0
       for (const step of steps) {
+        const key = resume ? stepKey({ stage, tool: step.tool, target: step.target }) : null
+
+        if (resume && isDone(state, key)) {
+          doLog(`resume: skip ${key}`)
+          summary.resumedSkipped++
+          continue
+        }
+
+        if (typeof budget?.maxStepsPerStage === "number" && stepsThisStage >= budget.maxStepsPerStage) {
+          doLog(`budget: maxStepsPerStage reached for stage ${stage}, moving to next stage`)
+          break
+        }
+        if (typeof budget?.maxSteps === "number" && stepsRun >= budget.maxSteps) {
+          // Do NOT break outerStages here: steps already run THIS stage may
+          // have written real output that only this stage's own synth turns
+          // into recon-map/enum-map/exploit-map.json (which findings/report
+          // read). Break only the per-step loop so the code below still
+          // records this (interrupted) stage's summary entry and runs its
+          // synth -- the run-wide stop happens right after that, once this
+          // stage is fully accounted for.
+          doLog(`budget: maxSteps reached mid-stage ${stage}, finishing this stage's synth before stopping`)
+          summary.budgetStopped = "maxSteps"
+          break
+        }
+
         summary.toolsRun++
-        try {
-          await doRunner({ ...step, stage })
-        } catch (err) {
-          doLog(`stage ${stage}: step ${step.tool} ${step.target} failed/denied, skipping: ${errMessage(err)}`)
+        stepsRun++
+        stepsThisStage++
+
+        // Bounded retry: only a "transient" outcome loops back; "ok" and
+        // "denied" are both terminal on the first classification. A throw
+        // from the runner is ALWAYS "transient" (never "denied") -- this is
+        // what keeps today's throwing-runner behavior identical when
+        // maxRetries is 0 (its only default).
+        let outcome = "ok"
+        let lastMessage = null
+        let retriesUsed = 0
+        for (;;) {
+          try {
+            const result = await doRunner({ ...step, stage })
+            outcome = classifyResult(result)
+            lastMessage = null
+          } catch (err) {
+            outcome = "transient"
+            lastMessage = errMessage(err)
+          }
+
+          if (outcome !== "transient") break
+          if (retriesUsed >= maxRetries) break
+          doLog(
+            `stage ${stage}: step ${step.tool} ${step.target} transient (attempt ${retriesUsed + 1}/${maxRetries}), retrying: ${lastMessage}`
+          )
+          await doSleep(backoff(retriesUsed))
+          retriesUsed++
+        }
+        summary.retried += retriesUsed
+
+        if (outcome === "transient") {
+          doLog(`stage ${stage}: step ${step.tool} ${step.target} failed/denied, skipping: ${lastMessage ?? "transient failure"}`)
+        } else if (outcome === "denied") {
+          doLog(`stage ${stage}: step ${step.tool} ${step.target} denied, skipping`)
+        }
+
+        // ok and denied are both SETTLED outcomes -- a denied step is not
+        // going to succeed on a later resume either, so it's marked done
+        // too (only an exhausted "transient" is left for a later --resume
+        // to retry).
+        if (resume && (outcome === "ok" || outcome === "denied")) {
+          state = markDone(state, key)
+          try {
+            await doSaveState(state)
+          } catch (err) {
+            doLog(`resume: saveState failed: ${errMessage(err)}`)
+          }
         }
       }
       summary.stages.push({ stage, steps: steps.length })
@@ -265,6 +397,11 @@ export async function runFullscan(deps = {}, opts = {}) {
       } catch (err) {
         doLog(`stage ${stage}: synth(${SYNTH_KIND[stage]}) failed: ${errMessage(err)}`)
       }
+
+      // The interrupted stage (if any) is now fully accounted for -- its
+      // summary entry is pushed and its synth ran above -- so it's now safe
+      // to stop the whole run.
+      if (summary.budgetStopped) break outerStages
     }
 
     try {

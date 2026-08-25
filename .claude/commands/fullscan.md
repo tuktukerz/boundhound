@@ -20,11 +20,23 @@ Load and follow the `pentest-workflow` skill against the active engagement.
    unauthorized scope makes `bh-fullscan` fail-closed (exit code 3) — if
    that happens, tell the operator the scope needs to be fixed before a
    fullscan can run, rather than running any stage by hand.
-3. Read the generated `report.md` and summarize it for the operator:
+3. For a long-running or previously interrupted engagement, see the
+   `pentest-workflow` skill's "Resilience" section and pass whichever of
+   these the operator wants (all optional, all off by default):
+   - `--resume` — continue an interrupted scan instead of starting over,
+     skipping steps already completed (tracked in
+     `engagements/<active>/output/fullscan-state.json`).
+   - `--max-retries N` — retry a transient tool failure (a network blip or
+     tool crash) up to `N` times, always re-running the identical bounded
+     `bh-exec` command; a DENY is never retried.
+   - `--max-steps N` / `--max-steps-per-stage N` — a hard ceiling on how
+     many tool steps the run performs; these only ever reduce autonomous
+     work, never expand it.
+4. Read the generated `report.md` and summarize it for the operator:
    engagement metadata, the severity-count table, how many findings are
    verified, the top findings by severity, and whether the exploit stage
    ran. Never alter `report.md`.
-4. Mention `/recon`, `/enum`, `/exploit`, `/verify`, and `/report` as the
+5. Mention `/recon`, `/enum`, `/exploit`, `/verify`, and `/report` as the
    way to inspect, re-run, or fine-tune any single stage instead of running
    the whole chain again.
 </command-instruction>
