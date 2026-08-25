@@ -340,24 +340,47 @@ export function extractFlags(argv) {
   const mri = rest.indexOf("--max-retries")
   if (mri >= 0) {
     const n = Number(rest[mri + 1])
-    if (Number.isFinite(n)) maxRetries = n
-    rest = [...rest.slice(0, mri), ...rest.slice(mri + 2)]
+    if (Number.isFinite(n)) {
+      maxRetries = n
+      rest = [...rest.slice(0, mri), ...rest.slice(mri + 2)]
+    } else {
+      // The value token is missing or not a valid number -- e.g. the flag
+      // was the last argv token, or the "value" is actually the NEXT
+      // recognized flag (a caller typo like "--max-retries --max-steps 5").
+      // Strip ONLY the flag itself so that next flag's own token is never
+      // eaten by this one's slice(idx, idx+2) -- swallowing it would
+      // silently leave --max-steps (a safety-positive run-budget ceiling)
+      // unset with no indication anything went wrong, which is worse than
+      // just ignoring this malformed flag loudly.
+      process.stderr.write("warning: --max-retries given without a valid numeric value; ignoring\n")
+      rest = [...rest.slice(0, mri), ...rest.slice(mri + 1)]
+    }
   }
 
   let maxSteps
   const msi = rest.indexOf("--max-steps")
   if (msi >= 0) {
     const n = Number(rest[msi + 1])
-    if (Number.isFinite(n)) maxSteps = n
-    rest = [...rest.slice(0, msi), ...rest.slice(msi + 2)]
+    if (Number.isFinite(n)) {
+      maxSteps = n
+      rest = [...rest.slice(0, msi), ...rest.slice(msi + 2)]
+    } else {
+      process.stderr.write("warning: --max-steps given without a valid numeric value; ignoring\n")
+      rest = [...rest.slice(0, msi), ...rest.slice(msi + 1)]
+    }
   }
 
   let maxStepsPerStage
   const mspsi = rest.indexOf("--max-steps-per-stage")
   if (mspsi >= 0) {
     const n = Number(rest[mspsi + 1])
-    if (Number.isFinite(n)) maxStepsPerStage = n
-    rest = [...rest.slice(0, mspsi), ...rest.slice(mspsi + 2)]
+    if (Number.isFinite(n)) {
+      maxStepsPerStage = n
+      rest = [...rest.slice(0, mspsi), ...rest.slice(mspsi + 2)]
+    } else {
+      process.stderr.write("warning: --max-steps-per-stage given without a valid numeric value; ignoring\n")
+      rest = [...rest.slice(0, mspsi), ...rest.slice(mspsi + 1)]
+    }
   }
 
   return { dataDir, noExploit, resume, maxRetries, maxSteps, maxStepsPerStage, rest }

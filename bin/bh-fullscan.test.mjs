@@ -388,6 +388,26 @@ test("extractFlags: --resume/--max-retries/--max-steps/--max-steps-per-stage par
   expect(r.rest).toEqual(["positional"])
 })
 
+test("extractFlags: a valueless numeric flag does NOT swallow a following recognized flag (--max-retries with no value, followed by --max-steps 10)", () => {
+  const r = extractFlags(["--max-retries", "--max-steps", "10"])
+  expect(r.maxSteps).toBe(10) // must NOT be swallowed by --max-retries' missing value
+  expect(r.maxRetries).toBe(0) // left at default since no valid value was given
+  expect(r.rest).toEqual([])
+})
+
+test("extractFlags: two consecutive valueless numeric flags -- neither swallows the other's flag token, both end up unset", () => {
+  const r = extractFlags(["--max-steps", "--max-steps-per-stage", "5"])
+  expect(r.maxStepsPerStage).toBe(5) // must NOT be swallowed by --max-steps' missing value
+  expect(r.maxSteps).toBeUndefined()
+  expect(r.rest).toEqual([])
+})
+
+test("extractFlags: a numeric flag as the very last token (no value at all) -- unset, rest empty, no crash", () => {
+  const r = extractFlags(["--max-steps"])
+  expect(r.maxSteps).toBeUndefined()
+  expect(r.rest).toEqual([])
+})
+
 test("extractFlags: none of the new flags given -> resume false, maxRetries 0, maxSteps/maxStepsPerStage undefined (today's shape)", () => {
   const r = extractFlags(["--data-dir", "/tmp/x"])
   expect(r.resume).toBe(false)
