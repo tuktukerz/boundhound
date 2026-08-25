@@ -39,6 +39,12 @@ jobs:
   e2e:
     name: docker e2e (real containers)
     runs-on: ubuntu-latest
+    # Best-effort: building the bh:base tool image + downloading tools can fail
+    # transiently on a hosted runner. This job must never red the overall run or
+    # block a merge — the deterministic `test` job is the required gate, and the
+    # real e2e are also run locally. continue-on-error keeps this visible but
+    # non-fatal.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
