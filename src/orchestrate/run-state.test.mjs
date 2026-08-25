@@ -32,6 +32,48 @@ test("stepKey: never throws on missing/garbage input", () => {
   expect(typeof stepKey(undefined)).toBe("string")
 })
 
+// Regression: a naive `${stage}|${tool}|${target}` join lets a field's own
+// contents forge a collision with a DIFFERENT tuple -- this must never
+// happen, since stepKey becomes the resume dedup key (Task 2) and a
+// collision there would make `--resume` silently skip a step that never
+// ran. Fails against the old unescaped join, passes against the current
+// JSON.stringify(["stage","tool","target"]) encoding.
+test("stepKey: collision-proof against delimiter/quote/bracket characters inside a field", () => {
+  const pairs = [
+    // stage:"a|b",tool:"c" vs stage:"a",tool:"b|c" -- both naively join to "a|b|c|d"
+    [
+      { stage: "a|b", tool: "c", target: "d" },
+      { stage: "a", tool: "b|c", target: "d" },
+    ],
+    // pipe inside target
+    [
+      { stage: "recon:httpx", tool: "httpx", target: "http://a|b" },
+      { stage: "recon:httpx", tool: "httpx|extra", target: "b" },
+    ],
+    // double-quote inside a field
+    [
+      { stage: 'a"b', tool: "c", target: "d" },
+      { stage: "a", tool: '"b', target: 'c"d' },
+    ],
+    // bracket characters inside a field (adversarial against a naive
+    // JSON-ish encoding too, not just "|")
+    [
+      { stage: "a]", tool: "[b", target: "c" },
+      { stage: "a", tool: "]", target: "[b,c]" },
+    ],
+  ]
+
+  for (const [a, b] of pairs) {
+    expect(stepKey(a)).not.toBe(stepKey(b))
+  }
+})
+
+test("stepKey: same tuple is still stable under the new key format", () => {
+  const tuple = { stage: "a|b", tool: "c", target: "http://a|b\"c]" }
+  expect(stepKey(tuple)).toBe(stepKey({ ...tuple }))
+  expect(stepKey(tuple)).toBe(stepKey(tuple))
+})
+
 // --- emptyState --------------------------------------------------------------
 
 test("emptyState: {version, done:{}} shape, version is a small constant integer", () => {
@@ -156,6 +198,8 @@ test("parseState: never throws on non-string input", () => {
   expect(() => parseState({})).not.toThrow()
   expect(parseState(undefined)).toEqual(emptyState())
   expect(parseState(null)).toEqual(emptyState())
+  expect(parseState(42)).toEqual(emptyState())
+  expect(parseState({})).toEqual(emptyState())
 })
 
 test("parseState: valid well-formed state parses correctly", () => {

@@ -15,14 +15,27 @@
 const VERSION = 1
 
 // The identifying tuple for one planned unit of work (one stage running one
-// tool against one target). Joined with "|" into a flat string key -- a
-// plain object can't be a Map/Set key or a JSON object key without this.
-// String()-coerce each field (matching findings.mjs's makeId) so a garbage
-// or missing field (undefined, null, a number) still hashes predictably
-// instead of producing "undefined" via implicit template-literal coercion
-// surprises for some fields and not others.
+// tool against one target), turned into a flat string key -- a plain object
+// can't be a Map/Set key or a JSON object key without this. String()-coerce
+// each field (matching findings.mjs's makeId) so a garbage or missing field
+// (undefined, null, a number) still hashes predictably instead of producing
+// "undefined" via implicit template-literal coercion surprises for some
+// fields and not others.
+//
+// Deliberately NOT a plain "|"-joined template literal: that would let a
+// field's own contents forge a collision with a *different* tuple, e.g.
+// stage:"a|b",tool:"c",target:"d" and stage:"a",tool:"b|c",target:"d" would
+// both join to "a|b|c|d". stage/tool are fixed pipe-free enums today, so
+// that's not reachable yet -- but this key becomes the resume dedup key
+// (Task 2), and a collision there would make `--resume` silently skip a
+// step that never actually ran, which is a correctness hazard worth closing
+// even though no caller currently triggers it. JSON.stringify of the
+// 3-element array encodes each field's length/quoting, so it is
+// collision-proof regardless of what characters a field contains, while
+// staying a pure, deterministic function of its input (same tuple -> same
+// key; distinct tuples -> distinct keys, always).
 export function stepKey({ stage, tool, target } = {}) {
-  return `${String(stage)}|${String(tool)}|${String(target)}`
+  return JSON.stringify([String(stage), String(tool), String(target)])
 }
 
 // The state resume tracks: a schema version (so a future format change can
