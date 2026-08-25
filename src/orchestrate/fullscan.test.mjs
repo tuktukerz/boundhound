@@ -3,6 +3,7 @@ import { test, expect } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { targetsForStage, runFullscan } from "./fullscan.mjs"
+import { stepKey, emptyState, isDone, markDone } from "./run-state.mjs"
 
 const fixturesDir = join(import.meta.dir, "..", "..", "test", "fixtures", "orchestrate")
 const reconMap = JSON.parse(readFileSync(join(fixturesDir, "recon-map.json"), "utf8"))
@@ -326,4 +327,195 @@ test("runFullscan: default (no-op) runner/synth/loadMaps/log -- never throws", a
 test("runFullscan: completely empty deps -- never throws", async () => {
   await expect(runFullscan()).resolves.toBeDefined()
   await expect(runFullscan({})).resolves.toBeDefined()
+})
+
+// --- O3: resume / retry / budget (Phase 7 resilience) -----------------------
+
+test("runFullscan: back-compat -- no new params behaves exactly as before; new summary fields default neutral", async () => {
+  const mocks = makeMocks()
+  const summary = await runFullscan({ runner: mocks.runner, synth: mocks.synth, loadMaps: mocks.loadMaps, scope, log: mocks.log })
+
+  expect(summary.toolsRun).toBe(11)
+  expect(summary.reportGenerated).toBe(true)
+  expect(summary.resumedSkipped).toBe(0)
+  expect(summary.retried).toBe(0)
+  expect(summary.budgetStopped).toBeFalsy()
+})
+
+test("runFullscan: resume -- pre-seeded done step is skipped (runner not called for it), remaining steps run, saveState called per completed unit, resumedSkipped counted", async () => {
+  const doneKey = stepKey({ stage: "recon:subfinder", tool: "subfinder", target: "acme.io" })
+  const seedState = markDone(emptyState(), doneKey)
+
+  const runnerCalls = []
+  const runner = async (step) => {
+    runnerCalls.push(step)
+    return { status: "ok" }
+  }
+  const synth = async () => {}
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const loadState = async () => seedState
+  const saveStateCalls = []
+  const saveState = async (state) => {
+    saveStateCalls.push(state)
+  }
+  const logLines = []
+  const log = (l) => logLines.push(l)
+
+  const summary = await runFullscan({ runner, synth, loadMaps, scope, log, loadState, saveState }, { resume: true })
+
+  // the pre-marked-done subfinder step was never invoked
+  expect(runnerCalls.some((c) => c.tool === "subfinder")).toBe(false)
+  // everything else still ran
+  expect(runnerCalls.some((c) => c.tool === "httpx")).toBe(true)
+  expect(runnerCalls.some((c) => c.tool === "nmap")).toBe(true)
+  expect(runnerCalls.some((c) => c.tool === "nuclei")).toBe(true)
+  expect(runnerCalls.some((c) => c.tool === "ffuf")).toBe(true)
+  expect(runnerCalls.some((c) => c.tool === "sqlmap")).toBe(true)
+
+  expect(summary.resumedSkipped).toBe(1)
+  // saveState called once per completed (ok/denied) step
+  expect(saveStateCalls.length).toBe(runnerCalls.length)
+  expect(logLines.some((l) => l.includes("resume: skip"))).toBe(true)
+})
+
+test("runFullscan: resume=false (default) -- loadState/saveState are never called even if provided", async () => {
+  let loadCalled = false
+  let saveCalled = false
+  const loadState = async () => {
+    loadCalled = true
+    return emptyState()
+  }
+  const saveState = async () => {
+    saveCalled = true
+  }
+  const mocks = makeMocks()
+  await runFullscan({ runner: mocks.runner, synth: mocks.synth, loadMaps: mocks.loadMaps, scope, log: mocks.log, loadState, saveState })
+
+  expect(loadCalled).toBe(false)
+  expect(saveCalled).toBe(false)
+})
+
+test("runFullscan: retry -- transient retried up to maxRetries then ok; injected sleep counted; summary.retried correct", async () => {
+  const sleepCalls = []
+  const sleep = async (ms) => {
+    sleepCalls.push(ms)
+  }
+  let subfinderCalls = 0
+  const runner = async (step) => {
+    if (step.tool === "subfinder") {
+      subfinderCalls++
+      if (subfinderCalls <= 2) return { status: "transient" }
+      return { status: "ok" }
+    }
+    return { status: "ok" }
+  }
+  const synth = async () => {}
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const logLines = []
+  const log = (l) => logLines.push(l)
+
+  const summary = await runFullscan(
+    { runner, synth, loadMaps, scope, log, sleep },
+    { retry: { maxRetries: 3, backoff: (attempt) => (attempt + 1) * 10 } }
+  )
+
+  expect(subfinderCalls).toBe(3) // 2 transient + 1 ok
+  expect(sleepCalls).toEqual([10, 20])
+  expect(summary.retried).toBe(2)
+  expect(logLines.some((l) => l.toLowerCase().includes("transient") || l.toLowerCase().includes("retry"))).toBe(true)
+})
+
+test("runFullscan: retry -- a denied outcome is NEVER retried and IS markDone'd", async () => {
+  let subfinderCalls = 0
+  const runner = async (step) => {
+    if (step.tool === "subfinder") {
+      subfinderCalls++
+      return { status: "denied" }
+    }
+    return { status: "ok" }
+  }
+  const sleepCalls = []
+  const sleep = async (ms) => sleepCalls.push(ms)
+  const synth = async () => {}
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const loadState = async () => emptyState()
+  let savedState = null
+  const saveState = async (state) => {
+    savedState = state
+  }
+  const log = () => {}
+
+  const summary = await runFullscan(
+    { runner, synth, loadMaps, scope, log, sleep, loadState, saveState },
+    { resume: true, retry: { maxRetries: 5, backoff: () => 1 } }
+  )
+
+  expect(subfinderCalls).toBe(1) // never retried despite maxRetries:5
+  expect(sleepCalls).toEqual([]) // denied never triggers backoff/sleep
+  expect(summary.retried).toBe(0)
+  const key = stepKey({ stage: "recon:subfinder", tool: "subfinder", target: "acme.io" })
+  expect(isDone(savedState, key)).toBe(true)
+})
+
+test("runFullscan: retry -- maxRetries:0 (default) + a throwing runner reproduces today's skip-not-fatal", async () => {
+  const mocks = makeMocks({ failOn: (step) => step.tool === "httpx" && step.target === "http://acme.io" })
+  const sleepCalls = []
+  const sleep = async (ms) => sleepCalls.push(ms)
+
+  const summary = await runFullscan(
+    { runner: mocks.runner, synth: mocks.synth, loadMaps: mocks.loadMaps, scope, log: mocks.log, sleep },
+    { retry: { maxRetries: 0 } }
+  )
+
+  expect(mocks.runnerCalls.some((c) => c.tool === "httpx" && c.target === "http://acme.io")).toBe(true)
+  expect(mocks.runnerCalls.some((c) => c.tool === "nmap")).toBe(true)
+  expect(mocks.runnerCalls.some((c) => c.tool === "sqlmap")).toBe(true)
+  expect(sleepCalls).toEqual([])
+  expect(summary.retried).toBe(0)
+  expect(summary.reportGenerated).toBe(true)
+  expect(mocks.logLines.some((l) => l.includes("denied") || l.includes("http://acme.io"))).toBe(true)
+})
+
+test("runFullscan: budget.maxSteps stops all further work; findings+report still run; budgetStopped set", async () => {
+  const runnerCalls = []
+  const runner = async (step) => {
+    runnerCalls.push(step)
+    return { status: "ok" }
+  }
+  const synthCalls = []
+  const synth = async (kind) => synthCalls.push(kind)
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const logLines = []
+  const log = (l) => logLines.push(l)
+
+  const summary = await runFullscan({ runner, synth, loadMaps, scope, log }, { budget: { maxSteps: 1 } })
+
+  expect(runnerCalls.length).toBe(1)
+  expect(synthCalls.slice(-2)).toEqual(["findings", "report"])
+  expect(summary.reportGenerated).toBe(true)
+  expect(summary.budgetStopped).toBeTruthy()
+  expect(logLines.some((l) => l.includes("budget"))).toBe(true)
+})
+
+test("runFullscan: budget.maxStepsPerStage caps each stage but every stage still proceeds", async () => {
+  const runnerCalls = []
+  const runner = async (step) => {
+    runnerCalls.push(step)
+    return { status: "ok" }
+  }
+  const synthCalls = []
+  const synth = async (kind) => synthCalls.push(kind)
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const log = () => {}
+
+  const summary = await runFullscan({ runner, synth, loadMaps, scope, log }, { budget: { maxStepsPerStage: 1 } })
+
+  const perStage = {}
+  for (const c of runnerCalls) perStage[c.stage] = (perStage[c.stage] || 0) + 1
+  expect(Object.keys(perStage)).toHaveLength(6) // all 6 stages still attempted
+  for (const stage of Object.keys(perStage)) {
+    expect(perStage[stage]).toBe(1)
+  }
+  expect(synthCalls.slice(-2)).toEqual(["findings", "report"])
+  expect(summary.budgetStopped).toBeFalsy()
 })
