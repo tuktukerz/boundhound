@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|WebFetch|WebSearch|Write|Edit|mcp__.*[Bb]urp.*",
+        "matcher": "Bash|WebFetch|WebSearch|Write|Edit|mcp__.*[Bb][Uu][Rr][Pp].*",
         "hooks": [
           { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/hooks/scope-guard.mjs\"" }
         ]

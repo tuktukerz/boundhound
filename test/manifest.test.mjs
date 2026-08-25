@@ -51,7 +51,7 @@ test("hooks/hooks.json PreToolUse matcher is the exact full tool set (core + Bur
   // dropping to just "WebFetch", or losing the Burp MCP arm — fails loudly
   // instead of passing silently. The `mcp__.*[Bb]urp.*` arm (Phase 8) routes
   // Burp MCP tool calls through the scope guard (deny-by-default choke point).
-  expect(matchers.some((m) => m === "Bash|WebFetch|WebSearch|Write|Edit|mcp__.*[Bb]urp.*")).toBe(true)
+  expect(matchers.some((m) => m === "Bash|WebFetch|WebSearch|Write|Edit|mcp__.*[Bb][Uu][Rr][Pp].*")).toBe(true)
 })
 
 // Cross-check parity: dev-mode (.claude/settings.json, $CLAUDE_PROJECT_DIR)
@@ -69,6 +69,34 @@ test("PreToolUse matcher is identical across dev-mode settings.json and plugin-m
   const settingsMatchers = settings.hooks.PreToolUse.map((entry) => entry.matcher)
   const hooksMatchers = hooks.hooks.PreToolUse.map((entry) => entry.matcher)
   expect(settingsMatchers).toEqual(hooksMatchers)
+})
+
+// Case-parity guard (Phase 8): the PreToolUse matcher must route EVERY Burp MCP
+// tool name that `isBurpMcpTool` accepts to the scope guard. `isBurpMcpTool` is
+// fully case-insensitive on "burp"; a matcher that only case-folds part of the
+// word (e.g. `[Bb]urp`) would let `mcp__BURP__x` slip past the choke point while
+// the guard would have denied it — the exact gap this asserts against. Modeled
+// as: for each tool name isBurpMcpTool accepts, the matcher regex must match it.
+test("PreToolUse matcher routes every Burp MCP tool name isBurpMcpTool accepts", async () => {
+  const { isBurpMcpTool } = await import("../src/guard/burp-guard.mjs")
+  const hooks = readJson("hooks/hooks.json")
+  const matcher = hooks.hooks.PreToolUse.map((e) => e.matcher).find((m) => m.includes("mcp__"))
+  expect(matcher).toBeTruthy()
+  const re = new RegExp(`^(?:${matcher})$`)
+  const burpNames = [
+    "mcp__burp__send_request",
+    "mcp__Burp__send_request",
+    "mcp__BURP__send_request",
+    "mcp__buRP__x",
+    "mcp__pro_burp__scan",
+    "mcp__PRO_BURP__scan",
+  ]
+  for (const name of burpNames) {
+    expect(isBurpMcpTool(name)).toBe(true) // sanity: guard would act on it
+    expect(re.test(name)).toBe(true) // matcher must route it to the hook
+  }
+  // A non-Burp MCP tool is neither guarded nor (necessarily) routed.
+  expect(isBurpMcpTool("mcp__github__create_issue")).toBe(false)
 })
 
 // P6 hardening: plugin.json's declared component paths must resolve to real

@@ -59,12 +59,18 @@ export function decideFromEvent(event, { loadScope = defaultLoadScope } = {}) {
 // Best-effort audit detail for a hook DENY: the Burp target for a Burp MCP
 // tool call (so the audit line is meaningful — "denied a Bash command" vs.
 // "denied a Burp call" both need to say *what* was targeted), else the
-// existing command/file_path/url fields. `isBurpMcpTool`/`extractBurpTarget`
-// are both hardened to never throw (Task 1), so this never needs its own
-// try/catch beyond the one already wrapping `auditHookDeny`'s caller.
+// existing command/file_path/url fields. This is evaluated as an argument to
+// `auditHookDeny` — OUTSIDE that function's own try/catch — so it self-guards:
+// `isBurpMcpTool`/`extractBurpTarget` are hardened to never throw (Task 1), but
+// a stray throw here must never crash the hook and lose its decision, so the
+// whole body is wrapped and falls back to null.
 function hookDenyDetail(event) {
-  if (isBurpMcpTool(event.tool_name)) return extractBurpTarget(event.tool_input)
-  return event.tool_input?.command ?? event.tool_input?.file_path ?? event.tool_input?.url ?? null
+  try {
+    if (isBurpMcpTool(event.tool_name)) return extractBurpTarget(event.tool_input)
+    return event.tool_input?.command ?? event.tool_input?.file_path ?? event.tool_input?.url ?? null
+  } catch {
+    return null
+  }
 }
 
 // Best-effort audit of a hook-level DENY (an attempted bypass caught before
