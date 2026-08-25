@@ -1,6 +1,6 @@
 {
   "name": "boundhound",
-  "description": "Autonomous pentest agent with enforced, deny-by-default scope safety. Phase 6: recon + enumeration + bounded exploitation + verified findings + reporting, orchestrated end to end by /fullscan through the same enforced bh-exec choke point.",
+  "description": "Autonomous pentest agent with enforced, deny-by-default scope safety. Phase 7: recon + enumeration + bounded exploitation + verified findings + reporting, orchestrated end to end by /fullscan through the same enforced bh-exec choke point, now resumable across interruption (--resume) with bounded retry of transient tool failures (--max-retries) and hard run/stage step budgets (--max-steps / --max-steps-per-stage).",
   "version": "0.1.0",
   "author": { "name": "tuktukerz" },
   "skills": "./.claude/skills/",
