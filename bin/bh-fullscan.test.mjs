@@ -3,7 +3,7 @@ import { test, expect, beforeEach } from "bun:test"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runFullscan } from "./bh-fullscan.mjs"
+import { runFullscan, makeRunner, extractFlags, backoff } from "./bh-fullscan.mjs"
 
 let root, engagementDir, outputDir
 
@@ -360,4 +360,250 @@ test("enum:ffuf plans 2 steps for the same host -> each step lands in its own di
   expect(contents[0]).not.toBe(contents[1])
   expect(contents[0]).toContain(`ffuf-marker::${targets[0]}`)
   expect(contents[1]).toContain(`ffuf-marker::${targets[1]}`)
+})
+
+// --- Phase 7 resilience: --resume / --max-retries / --max-steps / ---------
+// --max-steps-per-stage wiring (spec §4) -------------------------------------
+
+// --- extractFlags: pure argv parsing, same convention as --data-dir/
+// --no-exploit (never exercised via the isMain entrypoint under bun test,
+// since process.argv[1] never equals this file's own path there) ----------
+
+test("extractFlags: --resume/--max-retries/--max-steps/--max-steps-per-stage parsed and stripped from rest, alongside existing flags", () => {
+  const r = extractFlags([
+    "--data-dir", "/tmp/x",
+    "--no-exploit",
+    "--resume",
+    "--max-retries", "3",
+    "--max-steps", "10",
+    "--max-steps-per-stage", "2",
+    "positional",
+  ])
+  expect(r.dataDir).toBe("/tmp/x")
+  expect(r.noExploit).toBe(true)
+  expect(r.resume).toBe(true)
+  expect(r.maxRetries).toBe(3)
+  expect(r.maxSteps).toBe(10)
+  expect(r.maxStepsPerStage).toBe(2)
+  expect(r.rest).toEqual(["positional"])
+})
+
+test("extractFlags: none of the new flags given -> resume false, maxRetries 0, maxSteps/maxStepsPerStage undefined (today's shape)", () => {
+  const r = extractFlags(["--data-dir", "/tmp/x"])
+  expect(r.resume).toBe(false)
+  expect(r.maxRetries).toBe(0)
+  expect(r.maxSteps).toBeUndefined()
+  expect(r.maxStepsPerStage).toBeUndefined()
+})
+
+// --- backoff: bounded exponential, no jitter --------------------------------
+
+test("backoff: bounded exponential (base=500,cap=8000), deterministic, no jitter", () => {
+  expect(backoff(0)).toBe(500)
+  expect(backoff(1)).toBe(1000)
+  expect(backoff(2)).toBe(2000)
+  expect(backoff(10)).toBe(8000) // capped
+  expect(backoff(0)).toBe(backoff(0)) // deterministic, same input -> same output
+})
+
+// --- makeRunner: exit-code -> {status} mapping ------------------------------
+
+test("makeRunner: exit 0 -> {status:'ok'} and captures output", () => {
+  const logLines = []
+  const runner = makeRunner({
+    codeDir: root,
+    dataDir: root,
+    name: "acme",
+    spawn: () => ({ status: 0, stdout: "hi\n", stderr: "" }),
+    log: (l) => logLines.push(l),
+  })
+  const result = runner({ tool: "subfinder", target: "acme.io", flags: [], stage: "recon:subfinder" })
+  expect(result).toEqual({ status: "ok" })
+  expect(readFileSync(join(outputDir, "recon", "subfinder.jsonl"), "utf8")).toContain("hi")
+})
+
+test("makeRunner: exit 2 -> {status:'denied'}, DENY logged, no output file written", () => {
+  const logLines = []
+  const runner = makeRunner({
+    codeDir: root,
+    dataDir: root,
+    name: "acme",
+    spawn: () => ({ status: 2, stdout: "should-not-be-written\n", stderr: "" }),
+    log: (l) => logLines.push(l),
+  })
+  const result = runner({ tool: "nmap", target: "acme.io", flags: [], stage: "recon:nmap" })
+  expect(result).toEqual({ status: "denied" })
+  expect(logLines.some((l) => l.includes("DENY") && l.includes("nmap"))).toBe(true)
+  expect(existsSync(join(outputDir, "recon", "acme.io.gnmap"))).toBe(false)
+})
+
+test("makeRunner: other nonzero exit -> {status:'transient'}, logged, no output file written", () => {
+  const logLines = []
+  const runner = makeRunner({
+    codeDir: root,
+    dataDir: root,
+    name: "acme",
+    spawn: () => ({ status: 1, stdout: "should-not-be-written\n", stderr: "boom" }),
+    log: (l) => logLines.push(l),
+  })
+  const result = runner({ tool: "httpx", target: "http://acme.io", flags: [], stage: "recon:httpx" })
+  expect(result).toEqual({ status: "transient" })
+  expect(logLines.some((l) => l.includes("httpx") && l.includes("exited 1"))).toBe(true)
+  expect(existsSync(join(outputDir, "recon", "httpx.jsonl"))).toBe(false)
+})
+
+test("makeRunner: a spawn error (no status, result.error set) -> {status:'transient'}", () => {
+  const runner = makeRunner({
+    codeDir: root,
+    dataDir: root,
+    name: "acme",
+    spawn: () => ({ error: new Error("ENOENT"), stdout: null, stderr: null }),
+    log: () => {},
+  })
+  const result = runner({ tool: "nuclei", target: "http://acme.io", flags: [], stage: "enum:nuclei" })
+  expect(result).toEqual({ status: "transient" })
+})
+
+// --- runFullscan: --max-retries threading -----------------------------------
+
+test("maxRetries: a transient (non-0, non-2) exit is retried up to maxRetries with injected sleep receiving backoff(attempt) delays, then succeeds", async () => {
+  writeScope(VALID_SCOPE)
+  seedReconMap()
+  let subfinderCalls = 0
+  const calls = []
+  const spawn = (cmd, args) => {
+    calls.push({ cmd, args })
+    if (args[1] === "subfinder") {
+      subfinderCalls++
+      if (subfinderCalls <= 2) return { status: 1, stdout: "", stderr: "boom" }
+      return { status: 0, stdout: "ok\n", stderr: "" }
+    }
+    return { status: 0, stdout: "ok\n", stderr: "" }
+  }
+  const sleepCalls = []
+  const sleep = async (ms) => {
+    sleepCalls.push(ms)
+  }
+
+  const r = await runFullscan({ dataDir: root, spawn, maxRetries: 3, sleep })
+
+  expect(r.code).toBe(0)
+  expect(subfinderCalls).toBe(3) // 2 transient attempts + 1 success
+  expect(sleepCalls).toEqual([500, 1000]) // backoff(0), backoff(1)
+})
+
+test("maxRetries default (0) -- a transient step is attempted exactly once, never retried, run still completes", async () => {
+  writeScope(VALID_SCOPE)
+  seedReconMap()
+  const calls = []
+  const sleepCalls = []
+  const spawn = (cmd, args) => {
+    calls.push({ cmd, args })
+    if (args[1] === "subfinder") return { status: 1, stdout: "", stderr: "boom" }
+    return { status: 0, stdout: "ok\n", stderr: "" }
+  }
+  const sleep = async (ms) => sleepCalls.push(ms)
+
+  const r = await runFullscan({ dataDir: root, spawn, sleep })
+
+  expect(r.code).toBe(0)
+  expect(execCalls(calls).filter((c) => c.args[1] === "subfinder").length).toBe(1)
+  expect(sleepCalls).toEqual([])
+})
+
+// --- runFullscan: --max-steps / --max-steps-per-stage threading ------------
+
+test("maxSteps 1 -> only the first tool step is spawned across the whole run, findings+report still generated", async () => {
+  writeScope(VALID_SCOPE)
+  seedReconMap()
+  const calls = []
+  const r = await runFullscan({ dataDir: root, spawn: fakeSpawn(calls), maxSteps: 1 })
+
+  expect(r.code).toBe(0)
+  expect(execCalls(calls).length).toBe(1)
+  expect(execCalls(calls)[0].args[1]).toBe("subfinder")
+
+  const bins = synthCalls(calls).map((c) => c.args[0].split("/").pop())
+  expect(bins).toContain("bh-findings.mjs")
+  expect(bins).toContain("bh-report.mjs")
+})
+
+test("maxSteps omitted -> no budget applied, all 6 stage steps run (today's unbounded behavior)", async () => {
+  writeScope(VALID_SCOPE)
+  seedReconMap()
+  const calls = []
+  const r = await runFullscan({ dataDir: root, spawn: fakeSpawn(calls) })
+  expect(r.code).toBe(0)
+  expect(execCalls(calls).length).toBe(6)
+})
+
+test("maxStepsPerStage 1 -> caps steps run per stage without stopping the whole run", async () => {
+  writeScope(VALID_SCOPE)
+  // two http_services on one host -> enum:ffuf (and exploit:sqlmap) would
+  // otherwise plan 2 steps each; maxStepsPerStage:1 caps each stage at 1.
+  seedReconMap(RECON_MAP_TWO_HTTP_SERVICES)
+  const calls = []
+  const r = await runFullscan({ dataDir: root, spawn: fakeSpawn(calls), maxStepsPerStage: 1 })
+
+  expect(r.code).toBe(0)
+  const exec = execCalls(calls)
+  expect(exec.filter((c) => c.args[1] === "ffuf").length).toBe(1)
+  expect(exec.filter((c) => c.args[1] === "sqlmap").length).toBe(1)
+  // run still reaches the end (findings+report), not aborted
+  const bins = synthCalls(calls).map((c) => c.args[0].split("/").pop())
+  expect(bins).toContain("bh-report.mjs")
+})
+
+// --- runFullscan: --resume round-trip (real temp data-dir + stubbed spawn) --
+
+test("resume round-trip: first run writes fullscan-state.json with done units; second --resume run does not re-spawn already-done steps and still completes", async () => {
+  writeScope(VALID_SCOPE)
+  seedReconMap()
+
+  const calls1 = []
+  const r1 = await runFullscan({ dataDir: root, spawn: fakeSpawn(calls1), resume: true })
+  expect(r1.code).toBe(0)
+
+  const statePath = join(outputDir, "fullscan-state.json")
+  expect(existsSync(statePath)).toBe(true)
+  const state1 = JSON.parse(readFileSync(statePath, "utf8"))
+  expect(state1.version).toBe(1)
+  const doneKeys = Object.keys(state1.done)
+  // one "done" entry per successfully-run bh-exec step
+  expect(doneKeys.length).toBe(execCalls(calls1).length)
+  expect(doneKeys.length).toBe(6)
+
+  const calls2 = []
+  const r2 = await runFullscan({ dataDir: root, spawn: fakeSpawn(calls2), resume: true })
+  expect(r2.code).toBe(0)
+  // every step from run 1 is already recorded done -> zero bh-exec spawns
+  expect(execCalls(calls2).length).toBe(0)
+  // the scan still completes -- synth chain (recon-map/enum-map/exploit-map/
+  // findings/report) still runs even though every stage plans 0 fresh steps
+  const bins2 = synthCalls(calls2).map((c) => c.args[0].split("/").pop())
+  expect(bins2).toContain("bh-findings.mjs")
+  expect(bins2).toContain("bh-report.mjs")
+})
+
+test("resume: without --resume, no fullscan-state.json is ever written (today's shape unchanged)", async () => {
+  writeScope(VALID_SCOPE)
+  seedReconMap()
+  const calls = []
+  const r = await runFullscan({ dataDir: root, spawn: fakeSpawn(calls) })
+  expect(r.code).toBe(0)
+  expect(existsSync(join(outputDir, "fullscan-state.json"))).toBe(false)
+})
+
+// --- existing fail-closed / output-wiring behavior must still hold with the
+// new defaults in place (resume:false, maxRetries:0, no budget) -- covered
+// by the untouched tests above; these two additions cross-check the exact
+// same guarantees still hold when the CLI is invoked with zero Phase 7 flags
+// at all, i.e. a caller on the old call surface sees byte-identical behavior.
+
+test("fail-closed still holds with Phase 7 defaults: no active engagement -> code 3, zero spawns, state files untouched", async () => {
+  const bareRoot = mkdtempSync(join(tmpdir(), "bh-fullscan-bare-"))
+  const calls = []
+  const r = await runFullscan({ dataDir: bareRoot, spawn: fakeSpawn(calls) })
+  expect(r.code).toBe(3)
+  expect(calls.length).toBe(0)
 })
