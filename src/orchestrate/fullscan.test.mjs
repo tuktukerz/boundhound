@@ -44,6 +44,37 @@ test("recon:nmap -> reconMap.hosts + discovered in-scope hosts, deduped; out-of-
   expect(steps.some((s) => s.target === "evil.com")).toBe(false)
 })
 
+// Regression: a domain carved OUT of a broader wildcard (a normal scope
+// shape -- "*.acme.io" in scope, bare apex "acme.io" explicitly excluded)
+// must never leak into recon:httpx's derived host list. rootDomains() strips
+// "*." to produce the root "acme.io", which is simultaneously listed
+// out_of_scope -- matchTarget must DENY it, and every stage's final host
+// list must reflect that DENY, not just subfinder/nmap's.
+test("recon:httpx -> a root domain carved out via out_of_scope is excluded (no out-of-scope leak)", () => {
+  const carveOutScope = {
+    in_scope: { domains: ["*.acme.io"], cidrs: [] },
+    out_of_scope: { domains: ["acme.io"], cidrs: [] },
+  }
+  const reconMapWithSubdomain = { ...reconMap, hosts: [] }
+
+  const subfinderSteps = targetsForStage("recon:subfinder", { reconMap: reconMapWithSubdomain, enumMap }, carveOutScope)
+  const httpxSteps = targetsForStage("recon:httpx", { reconMap: reconMapWithSubdomain, enumMap }, carveOutScope)
+  const nmapSteps = targetsForStage("recon:nmap", { reconMap: reconMapWithSubdomain, enumMap }, carveOutScope)
+
+  // subfinder/nmap already correctly excluded the carved-out apex
+  expect(subfinderSteps.some((s) => s.target === "acme.io")).toBe(false)
+  expect(nmapSteps.some((s) => s.target === "acme.io")).toBe(false)
+  // httpx must match -- no step for the excluded apex, and no step at all
+  // whose target is built from it (http://acme.io)
+  expect(httpxSteps.some((s) => s.target === "http://acme.io")).toBe(false)
+  expect(httpxSteps.every((s) => s.target !== "http://acme.io")).toBe(true)
+
+  // api.acme.io (a real subdomain of the carved-out apex) still clears scope
+  // via the *.acme.io wildcard and must still be planned -- the fix must not
+  // over-exclude
+  expect(httpxSteps).toEqual([{ tool: "httpx", target: "http://api.acme.io", flags: ["-silent", "-json", "-td", "-title", "-sc"] }])
+})
+
 test("enum:nuclei -> one step per in-scope reconMap.http_services url", () => {
   const steps = targetsForStage("enum:nuclei", { reconMap, enumMap }, scope)
   expect(steps).toEqual([

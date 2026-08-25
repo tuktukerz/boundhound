@@ -139,11 +139,13 @@ export function targetsForStage(stage, maps, scope) {
       }
 
       case "recon:httpx": {
-        return discoveredInScopeHosts(reconMap, scope).map((host) => ({
-          tool: "httpx",
-          target: `http://${host}`,
-          flags: ["-silent", "-json", "-td", "-title", "-sc"],
-        }))
+        return discoveredInScopeHosts(reconMap, scope)
+          .filter((host) => isAllowed(host, scope))
+          .map((host) => ({
+            tool: "httpx",
+            target: `http://${host}`,
+            flags: ["-silent", "-json", "-td", "-title", "-sc"],
+          }))
       }
 
       case "recon:nmap": {
