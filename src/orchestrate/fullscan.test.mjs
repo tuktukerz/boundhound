@@ -497,6 +497,65 @@ test("runFullscan: budget.maxSteps stops all further work; findings+report still
   expect(logLines.some((l) => l.includes("budget"))).toBe(true)
 })
 
+// Regression: a mid-stage maxSteps cutoff (as opposed to hitting the ceiling
+// exactly at a stage boundary) must still synth the INTERRUPTED stage before
+// stopping -- steps that already ran in that stage wrote real output that
+// only that stage's own synth turns into recon-map/enum-map/exploit-map.json
+// (what findings/report read). recon:subfinder plans 1 step, recon:httpx
+// plans 2 -- maxSteps:2 is exhausted after httpx's FIRST step, mid-stage.
+test("runFullscan: budget.maxSteps mid-stage cutoff still synths the interrupted stage before stopping", async () => {
+  const runnerCalls = []
+  const runner = async (step) => {
+    runnerCalls.push(step)
+    return { status: "ok" }
+  }
+  const synthCalls = []
+  const synth = async (kind) => synthCalls.push(kind)
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const log = () => {}
+
+  const summary = await runFullscan({ runner, synth, loadMaps, scope, log }, { budget: { maxSteps: 2 } })
+
+  expect(runnerCalls.length).toBe(2)
+  expect(runnerCalls.map((c) => c.stage)).toEqual(["recon:subfinder", "recon:httpx"])
+
+  // the interrupted stage (recon:httpx) still got its own summary entry...
+  expect(summary.stages.find((s) => s.stage === "recon:httpx")).toEqual({ stage: "recon:httpx", steps: 2 })
+  // ...and its own synth: "recon-map" must appear TWICE (subfinder's + the
+  // interrupted httpx's), not once -- once is what an immediate
+  // `break outerStages` from inside the per-step loop would produce
+  expect(synthCalls.filter((k) => k === "recon-map")).toHaveLength(2)
+
+  // later stages never ran at all
+  expect(runnerCalls.some((c) => c.stage === "recon:nmap")).toBe(false)
+  expect(summary.stages.some((s) => s.stage === "recon:nmap")).toBe(false)
+
+  // findings+report still ran at the very end
+  expect(synthCalls.slice(-2)).toEqual(["findings", "report"])
+  expect(summary.reportGenerated).toBe(true)
+  expect(summary.budgetStopped).toBeTruthy()
+})
+
+test("runFullscan: budget.maxSteps:0 stops all work immediately (typeof-number gate, not truthiness)", async () => {
+  const runnerCalls = []
+  const runner = async (step) => {
+    runnerCalls.push(step)
+    return { status: "ok" }
+  }
+  const synthCalls = []
+  const synth = async (kind) => synthCalls.push(kind)
+  const loadMaps = async () => ({ reconMap, enumMap })
+  const log = () => {}
+
+  const summary = await runFullscan({ runner, synth, loadMaps, scope, log }, { budget: { maxSteps: 0 } })
+
+  expect(runnerCalls).toHaveLength(0)
+  expect(summary.stages).toEqual([])
+  expect(synthCalls).toEqual(["findings", "report"])
+  expect(summary.reportGenerated).toBe(true)
+  expect(summary.budgetStopped).toBeTruthy()
+})
+
 test("runFullscan: budget.maxStepsPerStage caps each stage but every stage still proceeds", async () => {
   const runnerCalls = []
   const runner = async (step) => {

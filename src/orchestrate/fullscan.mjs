@@ -285,7 +285,7 @@ export async function runFullscan(deps = {}, opts = {}) {
       // Checked at the top of every stage too (not just mid-stage below) so
       // that once the run budget is exhausted, later stages are never even
       // planned (loadMaps/targetsForStage skipped entirely for them).
-      if (budget?.maxSteps && stepsRun >= budget.maxSteps) {
+      if (typeof budget?.maxSteps === "number" && stepsRun >= budget.maxSteps) {
         doLog(`budget: maxSteps reached, stopping further stages`)
         summary.budgetStopped = "maxSteps"
         break outerStages
@@ -322,14 +322,21 @@ export async function runFullscan(deps = {}, opts = {}) {
           continue
         }
 
-        if (budget?.maxStepsPerStage && stepsThisStage >= budget.maxStepsPerStage) {
+        if (typeof budget?.maxStepsPerStage === "number" && stepsThisStage >= budget.maxStepsPerStage) {
           doLog(`budget: maxStepsPerStage reached for stage ${stage}, moving to next stage`)
           break
         }
-        if (budget?.maxSteps && stepsRun >= budget.maxSteps) {
-          doLog(`budget: maxSteps reached, stopping further stages`)
+        if (typeof budget?.maxSteps === "number" && stepsRun >= budget.maxSteps) {
+          // Do NOT break outerStages here: steps already run THIS stage may
+          // have written real output that only this stage's own synth turns
+          // into recon-map/enum-map/exploit-map.json (which findings/report
+          // read). Break only the per-step loop so the code below still
+          // records this (interrupted) stage's summary entry and runs its
+          // synth -- the run-wide stop happens right after that, once this
+          // stage is fully accounted for.
+          doLog(`budget: maxSteps reached mid-stage ${stage}, finishing this stage's synth before stopping`)
           summary.budgetStopped = "maxSteps"
-          break outerStages
+          break
         }
 
         summary.toolsRun++
@@ -390,6 +397,11 @@ export async function runFullscan(deps = {}, opts = {}) {
       } catch (err) {
         doLog(`stage ${stage}: synth(${SYNTH_KIND[stage]}) failed: ${errMessage(err)}`)
       }
+
+      // The interrupted stage (if any) is now fully accounted for -- its
+      // summary entry is pushed and its synth ran above -- so it's now safe
+      // to stop the whole run.
+      if (summary.budgetStopped) break outerStages
     }
 
     try {
