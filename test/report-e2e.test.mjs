@@ -202,11 +202,16 @@ test("report e2e: real bh-findings + real bh-report over seeded real-shaped maps
   expect(md).toContain("### [INFO] subdomain — www.acme.io")
   expect(md).toContain("### [INFO] content — https://acme.io/backup.zip")
 
-  // --- remediation guidance for the sqli, nuclei, and open-port finding
-  // types actually present in this report -------------------------------
+  // --- remediation guidance for EVERY finding type present in this report
+  // (sqli, nuclei, open-port, http-service, subdomain, content) -- each
+  // fragment below is a verbatim, distinctive substring of that type's
+  // entry in src/report/report.mjs's REMEDIATION table -------------------
   expect(md).toContain("Use parameterized queries / prepared statements")
   expect(md).toContain("Review the flagged template's category and severity")
   expect(md).toContain("Confirm the service is intentionally exposed")
+  expect(md).toContain("Review this exposed service for necessity and attack-surface awareness")
+  expect(md).toContain("Confirm this subdomain is still in active use")
+  expect(md).toContain("Review this discovered content for unintended exposure")
 })
 
 // Proves the fail-closed path in the real chain: a broken scope.yaml must
