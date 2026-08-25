@@ -32,7 +32,7 @@ For EACH `skills-library/<slug>/SKILL.md` (glob), assert:
 - **name == folder slug** (`<slug>`), lowercase-kebab.
 - **`description` contains `Triggers:`** (same convention as the active skills), and is non-empty.
 - **English-only:** none of a set of Indonesian sentinel words (reuse the sentinel list style from `test/workflow-skill.test.mjs`).
-- **No external references:** none of the forbidden project/vendor sentinels (OmOP/omop/zakirkun/oh-my-open/opencode/portswigger/…). (Burp/Burp Suite allowed.)
+- **No external references:** none of the forbidden project/vendor sentinels defined in the harness's shared sentinel list (reused byte-identical from `test/workflow-skill.test.mjs`). (Burp/Burp Suite allowed as the subject.)
 - **Boundhound wiring:** the body mentions at least one of: `bh-exec`, a bounded tool (`subfinder|httpx|nmap|ffuf|nuclei|sqlmap`), a phase command (`/recon|/enum|/exploit|/verify|/report|/fullscan|/burp`), or `scope.yaml`/scope — so no skill is generic prose detached from our system.
 - **Non-trivial body:** more than a minimum length; has at least one `##` section heading.
 Plus: an aggregate test that the library has at least N skills (a growth floor), and that every category referenced by a skill appears in the index.
