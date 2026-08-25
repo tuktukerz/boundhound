@@ -1,14 +1,29 @@
 import { fileURLToPath } from "node:url"
 import { join } from "node:path"
 import { classifyCommand } from "../src/guard/guard.mjs"
-import { activeName } from "../src/scope/active-engagement.mjs"
+import { activeName, loadActiveConfig } from "../src/scope/active-engagement.mjs"
+import { isBurpMcpTool, extractBurpTarget, decideBurpMcp } from "../src/guard/burp-guard.mjs"
 import { appendAudit } from "../src/audit/audit-log.mjs"
 import { dataRoot } from "../src/paths.mjs"
 
 const NETWORK_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SCOPE_FILE_RE = /engagements\/[^/]+\/scope\.yaml$/
 
-export function decideFromEvent(event) {
+// Real scope loader used by the CLI entry point (`isMain`, below). Burp MCP
+// calls never pass through bh-exec, so this hook is the only place that
+// enforces scope on them -- any failure here (no active engagement, missing
+// or broken scope.yaml, etc.) MUST fail closed to "no scope available"
+// rather than throw, so `decideBurpMcp` denies with "no-active-scope"
+// instead of the hook crashing into an unhandled-rejection allow.
+function defaultLoadScope() {
+  try {
+    return loadActiveConfig(dataRoot())
+  } catch {
+    return null
+  }
+}
+
+export function decideFromEvent(event, { loadScope = defaultLoadScope } = {}) {
   const mk = (decision, reason) => ({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -22,12 +37,34 @@ export function decideFromEvent(event) {
     return mk(r.decision === "ALLOW" ? "allow" : "deny", r.reason)
   }
   if (NETWORK_TOOLS.has(event.tool_name)) {
-    return mk("deny", `${event.tool_name} not yet threaded through scope enforcement (Fase 0) — use bh-exec`)
+    return mk("deny", `${event.tool_name} not yet threaded through scope enforcement (Phase 0) — use bh-exec`)
   }
   if ((event.tool_name === "Write" || event.tool_name === "Edit") && SCOPE_FILE_RE.test(event.tool_input?.file_path ?? "")) {
     return mk("deny", "scope.yaml is the trust root — edit only via /engagement or /mode, not directly")
   }
+  // Burp Suite runs on the host and issues its own HTTP requests, so Burp
+  // MCP tool calls never pass through bh-exec's scope check -- this is the
+  // only choke point for them (Phase 8 spec §2/§3). `loadScope` is injected
+  // (defaulting to the real active-engagement loader above) purely so this
+  // stays testable without touching disk; it is never called for any other
+  // tool_name, so non-Burp decisions above are unaffected.
+  if (isBurpMcpTool(event.tool_name)) {
+    const scope = loadScope()
+    const r = decideBurpMcp(event.tool_input, scope)
+    return mk(r.decision === "ALLOW" ? "allow" : "deny", r.reason)
+  }
   return mk("allow", "not-network-tool")
+}
+
+// Best-effort audit detail for a hook DENY: the Burp target for a Burp MCP
+// tool call (so the audit line is meaningful — "denied a Bash command" vs.
+// "denied a Burp call" both need to say *what* was targeted), else the
+// existing command/file_path/url fields. `isBurpMcpTool`/`extractBurpTarget`
+// are both hardened to never throw (Task 1), so this never needs its own
+// try/catch beyond the one already wrapping `auditHookDeny`'s caller.
+function hookDenyDetail(event) {
+  if (isBurpMcpTool(event.tool_name)) return extractBurpTarget(event.tool_input)
+  return event.tool_input?.command ?? event.tool_input?.file_path ?? event.tool_input?.url ?? null
 }
 
 // Best-effort audit of a hook-level DENY (an attempted bypass caught before
@@ -75,7 +112,7 @@ if (isMain) {
   if (out.hookSpecificOutput.permissionDecision === "deny") {
     auditHookDeny(dataRoot(), {
       tool: event.tool_name,
-      detail: event.tool_input?.command ?? event.tool_input?.file_path ?? event.tool_input?.url ?? null,
+      detail: hookDenyDetail(event),
       reason: out.hookSpecificOutput.permissionDecisionReason,
     })
   }
