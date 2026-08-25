@@ -242,3 +242,18 @@ test("CLI: unknown subcommand exits non-zero with a usage message on stderr", ()
   expect(r.status).not.toBe(0)
   expect(r.stderr.toLowerCase()).toContain("usage")
 })
+
+// Slug guard (defense-in-depth): a slug must be a plain kebab name, never a
+// path. Traversal-shaped slugs are rejected before any copy/remove happens.
+for (const bad of ["../foo", "..", "a/b", "foo/", "Foo", "a b", "../../etc"]) {
+  test(`promote rejects invalid slug ${JSON.stringify(bad)}`, () => {
+    const r = run(["promote", bad], { root })
+    expect(r.code).toBe(1)
+    expect(r.message.toLowerCase()).toContain("valid skill name")
+  })
+  test(`demote rejects invalid slug ${JSON.stringify(bad)} and deletes nothing`, () => {
+    const r = run(["demote", bad], { root })
+    expect(r.code).toBe(1)
+    expect(r.message.toLowerCase()).toContain("valid skill name")
+  })
+}

@@ -101,8 +101,17 @@ function listSkills({ libDir, activeDir }) {
   return { code: 0, message, skills }
 }
 
+// A skill slug must be a plain kebab directory name — never a path. This
+// closes any traversal concern for the copy/remove operations below (a slug
+// like "../foo" could otherwise resolve outside the skills dirs).
+function isValidSlug(slug) {
+  return typeof slug === "string" && /^[a-z0-9][a-z0-9-]*$/.test(slug)
+}
+
 function promoteSkill({ libDir, activeDir, slug, force }) {
   if (!slug) return { code: 1, message: `bh-skill: promote requires a slug\n\n${usage()}` }
+  if (!isValidSlug(slug))
+    return { code: 1, message: `bh-skill: promote: "${slug}" is not a valid skill name (a-z, 0-9, hyphen)` }
 
   const srcDir = join(libDir, slug)
   if (!existsSync(join(srcDir, "SKILL.md"))) {
@@ -137,6 +146,8 @@ function promoteSkill({ libDir, activeDir, slug, force }) {
 
 function demoteSkill({ libDir, activeDir, slug }) {
   if (!slug) return { code: 1, message: `bh-skill: demote requires a slug\n\n${usage()}` }
+  if (!isValidSlug(slug))
+    return { code: 1, message: `bh-skill: demote: "${slug}" is not a valid skill name (a-z, 0-9, hyphen)` }
 
   if (CORE_SKILLS.includes(slug)) {
     return {
